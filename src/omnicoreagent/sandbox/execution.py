@@ -115,7 +115,9 @@ class SandboxExecutionService:
         if owed <= 0:
             return
         self._sandbox_seconds_charged[session_id] = elapsed
-        await budgets.charge("sandbox_seconds", owed)
+        # The seconds already passed: a store that cannot take the charge must
+        # not end the run (a limit still does).
+        await budgets.charge_after_the_work("sandbox_seconds", owed)
 
     async def _refuse_if_every_command_is_denied(self, surface: str) -> None:
         """Refuse a sandbox no command could run in, before asking anyone.

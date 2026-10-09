@@ -1713,6 +1713,22 @@
             "title": "Session Id",
             "type": "string"
           },
+          "side_effects": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the run ended in error: the calls it already made that may have changed something (tool name, call id, outcome success or unknown). Resume the run; a new run can repeat them.",
+            "title": "Side Effects"
+          },
           "status": {
             "default": "success",
             "description": "Runtime outcome: success, error, cancelled, awaiting_approval, or awaiting_budget",
@@ -3908,6 +3924,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Run agent (synchronous)",
@@ -4127,6 +4153,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Decide an approval",
@@ -4448,6 +4484,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Resume a paused run",

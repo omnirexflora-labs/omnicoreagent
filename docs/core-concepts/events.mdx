@@ -216,6 +216,14 @@ whether a tool's arguments are kept in full) follows your
 | Safety and policy | `guardrail_check`, `guardrail_violation`, `policy_request_created` (each request put to the policy), `policy_decision_allow`, `policy_decision_ask`, `policy_decision_deny` |
 | Pauses and budgets | `run_suspended`, `run_resumed`, `run_interrupted`, `run_steered`, `budget_granted`, `budget_denied` |
 
+`run_resumed` says why in its metadata: `cause` is `approval`, `budget_grant`,
+`budget_denied`, `interrupted`, or `recovered_after_lapsed_lease`, and
+`trigger` is `explicit` (a call to `resume`) or `orphan_sweep` (the server's
+[sweeper](/docs/core-concepts/durable-runs)). A recovered run also carries
+`previous_owner`, `lease_expired_at` and `orphaned_seconds`, how long it sat
+with no process. A decided run the sweep resumed carries `decision` and
+`decided_at` instead.
+
 ## Look up a finished run
 
 | Call | Returns |

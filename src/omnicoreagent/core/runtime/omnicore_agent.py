@@ -14,13 +14,21 @@ from omnicoreagent.core.budgets import (
     active_budgets,
 )
 from omnicoreagent.core.runs import (
+    ClaimHeartbeat,
     RunInterrupted,
+    RunStateConflict,
     RunStateUnsupported,
     RunSuspended,
+    SIDE_EFFECT_STATUSES,
     RunTracker,
     current_run,
+    decided_waiting,
+    lease_expired,
+    note_side_effects,
+    resume_cause,
     supports_run_state,
 )
+from omnicoreagent.core.metrics import COUNTERS
 from omnicoreagent.core.runtime import (
     builder,
     construction,
@@ -68,6 +76,7 @@ from omnicoreagent.core.telemetry import (
     export_trace_to_many,
     set_telemetry_context,
 )
+from omnicoreagent.core.telemetry.context import current_telemetry_context
 
 
 
@@ -99,6 +108,13 @@ def _without_changed_continuation(original: Any, redacted: Any) -> Any:
 
 # A run in one of these has ended; nothing from outside reopens or rewrites it.
 _ENDED_RUN_STATUSES = frozenset({"completed", "failed", "cancelled", "timeout", "abandoned"})
+
+# Seconds to wait before each further try of a memory read that failed: the
+# store restarting (the support desk chaos run, 2026-10-07, Postgres "shutting
+# down") is over in a moment, and a read has no side effect to repeat. A run
+# whose store stays down fails with the store's error rather than going on
+# without its history.
+STORE_READ_RETRY_DELAYS = (0.5, 1.5)
 
 class OmniCoreAgent:
     """
@@ -200,6 +216,13 @@ class OmniCoreAgent:
         self._telemetry_retention_last: dict[str, Any] | None = None
         self._telemetry_retention_automatic_runs = 0
         self._run_retention_started = False
+        # Runs this process is executing now: the orphan sweep never claims
+        # one of its own, whatever its heartbeat says.
+        self._active_run_ids: set[str] = set()
+        # Run IDs made by ``generate_run_id`` and not yet run.
+        self._fresh_run_ids: set[str] = set()
+        # Heartbeats of claimed orphans whose resume has not started its own.
+        self._claim_heartbeats: dict[str, ClaimHeartbeat] = {}
         self._run_retention_last: Dict[str, Any] | None = None
         self._run_retention_automatic_runs = 0
         # A caller-chosen store is never silently replaced by a background
@@ -384,7 +407,14 @@ class OmniCoreAgent:
 
     def generate_run_id(self) -> str:
         """Generate a unique run ID inside a session."""
-        return f"run_{uuid.uuid4().hex}"
+        run_id = f"run_{uuid.uuid4().hex}"
+        # A run ID made here cannot exist in the store yet, so the run that
+        # starts with it need not look for one (see ``run``). Bounded: an ID
+        # made and never run is forgotten.
+        if len(self._fresh_run_ids) > 4096:
+            self._fresh_run_ids.clear()
+        self._fresh_run_ids.add(run_id)
+        return run_id
 
     def _ensure_telemetry(self) -> None:
         """Attach default telemetry components."""
@@ -759,6 +789,7 @@ class OmniCoreAgent:
         tags: Optional[List[str]] = None,
         provenance: Optional[Dict[str, Any]] = None,
         _resume: Optional[Dict[str, Any]] = None,
+        _resume_cause: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Run the agent with a query and optional session ID.
@@ -791,12 +822,16 @@ class OmniCoreAgent:
             await self._apply_run_retention(trigger="automatic")
 
         run_id = run_id or self.generate_run_id()
+        # An ID this agent just made has no record to find: no read to know it.
+        # Taken out of the set so a second run with the same ID does read.
+        fresh_run_id = run_id in self._fresh_run_ids
+        self._fresh_run_ids.discard(run_id)
         trace_context = None
         run_tracker = None
         keep_alive = None
         run_budgets = None
         retry_of = None
-        if _resume is None and supports_run_state(self.memory_router):
+        if _resume is None and not fresh_run_id and supports_run_state(self.memory_router):
             # A known run ID: recover a run whose process died, refuse one that
             # is still live, or start a finished or failed one again. Read from
             # the router directly: initializing here would put an
@@ -837,7 +872,12 @@ class OmniCoreAgent:
             else streaming.current_delivery.get()
         )
         delivery_token = streaming.current_delivery.set(delivery)
+        # Who started this run: a background supervisor recovers its own runs,
+        # so the orphan sweep must be able to tell them from interactive ones.
+        started_by = current_telemetry_context()
+        surface = (started_by.execution_surface if started_by else None) or "interactive"
         try:
+            self._active_run_ids.add(run_id)
             trace_context = await self.telemetry_recorder.start_trace(
                 name="agent.run",
                 kind="agent.run",
@@ -856,11 +896,23 @@ class OmniCoreAgent:
                     input={"message": query},
                 )
             else:
-                await self._close_dead_segments(run_id, trace_context.trace_id)
+                await self._close_dead_segments(
+                    run_id, trace_context.trace_id, list(_resume.get("trace_ids") or [])
+                )
+                # Why: the state the run was left in, and who resumed it. A
+                # sweeper passes the cause it read before it claimed the run,
+                # since claiming rewrites the lease.
+                why = {"trigger": "explicit", **(_resume_cause or resume_cause(_resume))}
+                COUNTERS.inc(
+                    "omniserve_runs_resumed_total",
+                    trigger=why["trigger"],
+                    cause=why["cause"],
+                )
                 await self.telemetry_recorder.emit_event(
                     "run_resumed",
                     actor=self._telemetry_actor(),
                     metadata={
+                        **why,
                         "previous_trace_ids": list(_resume.get("trace_ids") or []),
                         "step": _resume.get("step"),
                         "approvals": [
@@ -903,9 +955,6 @@ class OmniCoreAgent:
 
             # The run's durable record lives in the chosen memory store.
             lease_seconds = int(self.agent_config.get("run_lease_seconds") or 60)
-            if _resume is not None or retry_of is not None:
-                # What a dead attempt of this run left running goes first.
-                await self._remove_run_sandboxes(run_id)
             if _resume is not None:
                 run_tracker = RunTracker.from_record(
                     self.memory_router, _resume, lease_seconds=lease_seconds
@@ -923,6 +972,16 @@ class OmniCoreAgent:
                     agent_version=self.agent_config.get("agent_version"),
                     lease_seconds=lease_seconds,
                 )
+            if _resume is None:
+                run_tracker.record["surface"] = surface
+                # The request is part of the run from its first save. If the
+                # memory store fails before the message reaches the session
+                # history, a resume still has it (the support desk chaos run,
+                # 2026-10-07, run_69673b9e answered a request nobody recorded).
+                run_tracker.record["request"] = {
+                    "content": self.privacy_filter.redact(query, boundary="memory"),
+                    "at": datetime.now(timezone.utc).isoformat(),
+                }
             # Load the model client off the event loop before the heartbeat
             # starts: imported on the loop at a process's first call, it froze
             # it for seconds to minutes, the heartbeat stalled and a second
@@ -931,7 +990,21 @@ class OmniCoreAgent:
             # warm_up, or a plain one.
             run_tracker.attach_trace(trace_context.trace_id)
             await self._warm_up_model_client(in_trace=True)
+            claim_beat = self._claim_heartbeats.pop(run_id, None)
+            if claim_beat is not None:
+                # The claim kept the lease alive through the slow start; the
+                # tracker's first save continues from the version it left.
+                claimed_version = await claim_beat.stop()
+                if claimed_version is not None:
+                    run_tracker.adopt_version(claimed_version)
             await run_tracker.start(trace_context.trace_id)
+            if _resume is not None or retry_of is not None:
+                # What a dead attempt of this run left running goes only now,
+                # once this process has won the version-checked save that makes
+                # the run its own. Before it, a second process that lost the
+                # race removed the winner's sandbox (found merging the P6
+                # tracks, 2026-10-07).
+                await self._remove_run_sandboxes(run_id)
             # Keeps the heartbeat fresh during long model or tool calls.
             keep_alive = asyncio.create_task(run_tracker.keep_alive())
 
@@ -1028,12 +1101,26 @@ class OmniCoreAgent:
             # The run is over: its spend goes on its record and its own budget
             # counter is removed, so a request leaves nothing behind.
             budgets_spent = await run_budgets.settle() if run_budgets is not None else None
+            run_error = formatted_response.pop("_run_error", None)
+            if trace_status != TraceStatus.COMPLETED and run_error is None:
+                # A run can end failed with no exception (a step limit, a
+                # refusal, a budget): its record still says why. The support
+                # desk chaos run (2026-10-07) found failed runs reading
+                # `error: null`.
+                run_error = {
+                    "type": "RunFailed",
+                    "message": str(formatted_response.get("response") or "")[:500],
+                }
+            if run_error is not None:
+                run_error = self.privacy_filter.redact(run_error, boundary="public")
             await run_tracker.finish(
                 "completed" if trace_status == TraceStatus.COMPLETED else "failed",
                 usage=formatted_response.get("metric"),
                 budgets=budgets_spent,
+                error=run_error if trace_status != TraceStatus.COMPLETED else None,
+                termination_reason=formatted_response.get("termination_reason"),
             )
-            await self._settle_workers(run_id)
+            await self._settle_workers(run_id, run_tracker)
             run_summary = await self._run_summary(trace_context.trace_id)
             await self.telemetry_recorder.emit_event(
                 "final_answer",
@@ -1183,6 +1270,7 @@ class OmniCoreAgent:
             raise
 
         finally:
+            self._active_run_ids.discard(run_id)
             if keep_alive is not None:
                 keep_alive.cancel()
             streaming.current_delivery.reset(delivery_token)
@@ -1313,11 +1401,18 @@ class OmniCoreAgent:
                 run_tracker.finish(
                     status,
                     usage=usage if usage is not None else getattr(exc, "usage", None),
-                    error=exc,
+                    # Redacted as the response and the trace are.
+                    error=self.privacy_filter.redact(
+                        {"type": type(exc).__name__, "message": str(exc)},
+                        boundary="public",
+                    ),
                     budgets=budgets_spent,
+                    # An exception that reached here is not the provider's
+                    # (a provider's error ends the run in the model step).
+                    termination_reason="internal_error" if status == "failed" else status,
                 )
             )
-            await complete_despite_cancellation(self._settle_workers(run_tracker.run_id))
+            await complete_despite_cancellation(self._settle_workers(run_tracker.run_id, run_tracker))
         except Exception as record_exc:
             runtime_logger().warning(
                 f"Could not record run {run_tracker.run_id} as {status}: "
@@ -1346,6 +1441,12 @@ class OmniCoreAgent:
         if budgets is None or not budgets.enabled:
             return []
         settled = record.get("budgets") or {}
+        # Charges the store could not take after the work was done: on the
+        # record, not in the counters, so they are shown beside them.
+        unrecorded: Dict[tuple, float] = {}
+        for charge in record.get("unrecorded_charges") or settled.get("unrecorded") or []:
+            slot = (charge.get("key"), charge.get("meter"))
+            unrecorded[slot] = unrecorded.get(slot, 0.0) + float(charge.get("amount") or 0.0)
         entries: List[Dict[str, Any]] = []
         for meter in METERS:
             for scope, key, limit in budgets.limits(meter):
@@ -1371,6 +1472,7 @@ class OmniCoreAgent:
                         "granted": granted,
                         "spent": spent,
                         "reserved": reserved.get(meter, 0.0),
+                        "unrecorded": unrecorded.get((key, meter), 0.0),
                         "remaining": max(
                             0.0, limit.limit + granted - spent - reserved.get(meter, 0.0)
                         ),
@@ -1405,20 +1507,217 @@ class OmniCoreAgent:
         except RunStateUnsupported:
             return None
 
-    async def resume(self, run_id: str, on_event: Any = None) -> Dict[str, Any]:
+    async def resume(
+        self, run_id: str, on_event: Any = None, *, trigger: str = "explicit"
+    ) -> Dict[str, Any]:
         """Continue a run: one waiting for approval once every approval is
         decided (see ``resolve_approval``), or one whose process stopped
         (its heartbeat is older than ``run_lease_seconds``). Completed tool
-        calls never run again."""
+        calls never run again.
+
+        ``trigger`` says who resumed it, for the run's trace and the
+        ``omniserve_runs_resumed_total`` metric: a person or client
+        (``explicit``), or the background supervisor retrying
+        (``background_retry``)."""
         record = await self._run_record(run_id)
         if record is None:
             raise LookupError(f"No run {run_id}")
         problem = _not_resumable(record, run_id)
-        if problem is not None:
+        # A run that hit its deadline is stopped, not finished: its record
+        # holds the calls it made and the conversation to that point, so it
+        # continues as an interrupted run does (the chaos run, 2026-10-07,
+        # had a client start a new run, which would repeat the refund the
+        # timed-out run had made). `run(run_id=)` still starts a new attempt.
+        if problem is not None and record["status"] != "timeout":
             raise ValueError(problem)
-        return await self.run(
-            None, session_id=record["session_id"], run_id=run_id, on_event=on_event, _resume=record
+        try:
+            return await self.run(
+                None,
+                session_id=record["session_id"],
+                run_id=run_id,
+                on_event=on_event,
+                _resume=record,
+                _resume_cause=(
+                    None if trigger == "explicit" else {"trigger": trigger, **resume_cause(record)}
+                ),
+            )
+        except RunStateConflict:
+            # The version check lost: the orphan sweep (or another client)
+            # claimed the run between our read and our first save. The run is
+            # theirs and goes on there, so this caller is told so, as it is
+            # when it arrives after the claim (the route answers 409).
+            raise ValueError(
+                f"Run {run_id} was taken by another process while this resume started"
+            ) from None
+
+    async def claim_orphaned_runs(
+        self,
+        *,
+        limit: int = 10,
+        max_recoveries: int = 3,
+        decided_grace_seconds: float = 30.0,
+    ) -> List[Dict[str, Any]]:
+        """Take over this agent's runs that nobody is working on, and say which.
+
+        Two kinds of run are taken. An orphan is a run still ``running`` whose
+        heartbeat is older than its lease, started by this agent (by name) and
+        not by a background supervisor, which recovers its own. A decided run
+        is one waiting for an approval or a budget decision that a person has
+        made, and that nobody has resumed for ``decided_grace_seconds`` (the
+        client that should have called ``resume`` was refused or is gone). A
+        run with a decision still pending is left waiting.
+
+        Each run is claimed with the record's own version check: the claim
+        writes a new owner and a fresh heartbeat, and a second process that
+        read the same record fails the check and skips it, so a run is never
+        resumed twice. A client's ``resume`` that read the record before the
+        claim fails its first save the same way and is refused. Each claim is
+        then given to ``resume_claimed``. An orphan claimed ``max_recoveries``
+        times and still not finished is ended ``failed`` instead (it is
+        probably what kills its process); a decided run's claim does not count.
+
+        Orphans were added after the support desk chaos run (2026-10-07), where
+        runs whose process died stayed ``running`` until someone called
+        ``resume``. Decided runs were added after the ramp at 100 users the
+        same day, where 119 approved runs waited for a resume that the
+        admission limit had answered 503.
+        """
+        if not self._initialized:
+            await self.initialize()
+        if not supports_run_state(self.memory_router):
+            return []
+        try:
+            running = await self.memory_router.list_run_states(None, "running", 1000)
+        except RunStateUnsupported:
+            return []
+        lease_seconds = int(self.agent_config.get("run_lease_seconds") or 60)
+        claims: List[Dict[str, Any]] = []
+        for record in running:
+            if len(claims) >= limit:
+                break
+            run_id = record["run_id"]
+            if (
+                record.get("agent_name") != self.name
+                or run_id in self._active_run_ids
+                or record.get("surface") == "background"
+                or not lease_expired(record)
+            ):
+                continue
+            recoveries = int(record.get("recovery_count") or 0)
+            if recoveries >= max_recoveries:
+                await self.abandon_run(
+                    run_id,
+                    status="failed",
+                    reason=(
+                        f"recovered {recoveries} times and still did not finish; "
+                        "it is probably what stops its process"
+                    ),
+                )
+                continue
+            # What the run looked like before the claim rewrites its lease.
+            cause = {"trigger": "orphan_sweep", **resume_cause(record)}
+            claim = await self._claim_record(record, cause, recoveries + 1, lease_seconds)
+            if claim is not None:
+                claims.append(claim)
+        for status in ("awaiting_approval", "awaiting_budget"):
+            if len(claims) >= limit:
+                break
+            try:
+                waiting = await self.memory_router.list_run_states(None, status, 1000)
+            except RunStateUnsupported:
+                break
+            for record in waiting:
+                if len(claims) >= limit:
+                    break
+                decided = decided_waiting(record, grace_seconds=decided_grace_seconds)
+                if (
+                    decided is None
+                    or record.get("agent_name") != self.name
+                    or record["run_id"] in self._active_run_ids
+                    or record.get("surface") == "background"
+                ):
+                    continue
+                # The cause is the one an explicit resume would record, plus
+                # the decision, so a trace says why nobody resumed it earlier.
+                cause = {
+                    "trigger": "orphan_sweep",
+                    **resume_cause(record),
+                    "decision": decided["decision"],
+                    "decided_at": decided["decided_at"],
+                }
+                claim = await self._claim_record(
+                    record, cause, int(record.get("recovery_count") or 0), lease_seconds
+                )
+                if claim is not None:
+                    claims.append(claim)
+        return claims
+
+    async def _claim_record(
+        self, record: Dict[str, Any], cause: Dict[str, Any], recovery_count: int, lease_seconds: int
+    ) -> Optional[Dict[str, Any]]:
+        """Claim one run through the record's version check; None if another
+        process (or the client's own resume) got there first.
+
+        A waiting run is claimed as ``running``: that is what makes a client
+        resume arriving after the claim answer 409 (its heartbeat is current)
+        rather than start the run a second time.
+        """
+        from uuid import uuid4
+
+        run_id = record["run_id"]
+        claimed = {key: value for key, value in record.items() if key != "version"}
+        now = datetime.now(timezone.utc).isoformat()
+        claimed.update(
+            status="running",
+            owner=f"owner_sweep_{uuid4().hex}",
+            heartbeat_at=now,
+            updated_at=now,
+            lease_seconds=lease_seconds,
+            recovery_count=recovery_count,
         )
+        try:
+            claimed["version"] = await self.memory_router.save_run_state(
+                dict(claimed), expected_version=record["version"]
+            )
+        except RunStateConflict:
+            return None  # another process claimed it first
+        runtime_logger().info(
+            f"Claimed run {run_id} ({cause.get('cause')}; owner {cause.get('previous_owner')}, "
+            f"orphaned {cause.get('orphaned_seconds')}s)"
+        )
+        # The claim's lease starts now, but the resume can take longer than
+        # a lease to start (a cold model client took 74 s against 60 s).
+        beat = ClaimHeartbeat(self.memory_router, claimed, lease_seconds=lease_seconds)
+        beat.start()
+        self._claim_heartbeats[run_id] = beat
+        return {"run_id": run_id, "record": claimed, "cause": cause}
+
+    async def resume_claimed(self, claim: Dict[str, Any], on_event: Any = None) -> Dict[str, Any]:
+        """Continue a run ``claim_orphaned_runs`` returned, with the same
+        durable rules as ``resume``: completed calls never run again, and a
+        call that did not finish becomes ``unknown_outcome`` unless its tool
+        is idempotent."""
+        record = claim["record"]
+        try:
+            return await self.run(
+                None,
+                session_id=record["session_id"],
+                run_id=claim["run_id"],
+                on_event=on_event,
+                _resume=record,
+                _resume_cause=claim["cause"],
+            )
+        finally:
+            # The run took the heartbeat over when it started; if it failed
+            # before that, the claim's heartbeat must not outlive it.
+            await self.release_claim(claim)
+
+    async def release_claim(self, claim: Dict[str, Any]) -> None:
+        """Stop keeping a claim's lease alive (a claim nobody will resume, or
+        one the run has taken over). Safe to call more than once."""
+        beat = self._claim_heartbeats.pop(claim["run_id"], None)
+        if beat is not None:
+            await beat.stop()
 
     async def steer(
         self, run_id: str, message: str, *, sender: Optional[str] = None
@@ -1601,7 +1900,12 @@ class OmniCoreAgent:
         except Exception as exc:  # noqa: BLE001 - the record holds it regardless.
             runtime_logger().warning(f"Outcome of {run_id} not written to its trace: {exc}")
 
-    async def _close_dead_segments(self, run_id: str, current_trace_id: str) -> None:
+    async def _close_dead_segments(
+        self,
+        run_id: str,
+        current_trace_id: str,
+        previous_trace_ids: list[str] | None = None,
+    ) -> None:
         """Close the earlier segments of a resumed run that never ended.
 
         A process killed mid-segment cannot end its own trace. The run's record
@@ -1611,9 +1915,28 @@ class OmniCoreAgent:
         `interrupted`, ended at its last event. A resume happens only after
         the lease lapsed or a person decided, so no live process owns the
         segment. A failure here never stops the resume.
+
+        The run's record names its segments (``previous_trace_ids``), so only
+        those are read. This ran on every resume through ``list_traces``,
+        which walks every trace in the store, and about 5% of a 30-user
+        profile went there, growing with the store (the support desk ramp,
+        2026-10-07). A record from before segments were named has none, and
+        only then is the run's listing used.
         """
         try:
-            for trace in await self.telemetry_store.list_traces(TraceFilter(run_id=run_id)):
+            if previous_trace_ids:
+                segments = [
+                    trace
+                    for trace in [
+                        await self.telemetry_store.get_trace(trace_id)
+                        for trace_id in dict.fromkeys(previous_trace_ids)
+                        if trace_id != current_trace_id
+                    ]
+                    if trace is not None
+                ]
+            else:
+                segments = await self.telemetry_store.list_traces(TraceFilter(run_id=run_id))
+            for trace in segments:
                 if (
                     trace.trace_id == current_trace_id
                     or trace.status != TraceStatus.RUNNING
@@ -1666,6 +1989,8 @@ class OmniCoreAgent:
                 return
             current["status"] = status
             current["error"] = {"type": "RunEndedOutside", "message": reason}
+            if status in SIDE_EFFECT_STATUSES:
+                note_side_effects(current)
             if spent:
                 current["budgets"] = spent
             # A request no one will resume into is closed: granting it later
@@ -1679,7 +2004,7 @@ class OmniCoreAgent:
         await self._settle_workers(run_id)
         return await self.get_run(run_id)
 
-    async def _settle_workers(self, lead_run_id: str) -> None:
+    async def _settle_workers(self, lead_run_id: str, tracker: Any = None) -> None:
         """Mark the workers of an ended lead run that nothing will resume.
 
         A lead process that died left the workers it had started `running`,
@@ -1693,6 +2018,13 @@ class OmniCoreAgent:
         from omnicoreagent.core.runs import lease_expired, update_from_outside
 
         try:
+            if tracker is not None and tracker.enabled and not tracker.record.get("delegations"):
+                # The run that just ended wrote its own record, delegations
+                # included, and named none: there is no worker to settle, and
+                # reading the record back only to learn that cost a database
+                # round trip at the end of every run (the support desk ramp,
+                # 2026-10-07).
+                return
             lead = await self._run_record(lead_run_id)
             if lead is None or lead.get("status") not in _ENDED_RUN_STATUSES:
                 return
@@ -1900,6 +2232,9 @@ class OmniCoreAgent:
                         approver=approver,
                         note=note,
                         amount=given if granted else 0.0,
+                        # The sweep waits a grace period from here for a
+                        # client to resume before it resumes the run itself.
+                        decided_at=datetime.now(timezone.utc).isoformat(),
                     )
 
         # The decision is recorded on the run; the run's own trace records it
@@ -2020,8 +2355,10 @@ class OmniCoreAgent:
             refused=refused,
         )
 
-    async def _run_summary(self, trace_id: str) -> Dict[str, Any]:
-        """Totals for the run so far, with its subagents' tokens and cost added."""
+    async def _run_summary(self, trace_id: str, *, whole_run: bool = True) -> Dict[str, Any]:
+        """Totals for this trace segment, with its subagents' tokens and cost
+        added; for a resumed run, ``whole_run`` adds the totals of every
+        segment (see ``_whole_run``)."""
         recorder = self.telemetry_recorder
         # Totals only read the trace; a copy of it would be most of the work.
         trace = await recorder.peek_trace(trace_id)
@@ -2051,9 +2388,60 @@ class OmniCoreAgent:
             "estimated_cost_usd": round(combined_cost, 10) if priced else None,
             "cost_complete": cost_complete,
         }
+        previous = next(
+            (
+                list(event.metadata.get("previous_trace_ids") or [])
+                for event in trace.events
+                if event.event_type == "run_resumed"
+            ),
+            [],
+        )
+        if whole_run and previous:
+            summary["whole_run"] = await self._whole_run(summary, trace, previous)
         return {
             "run_summary": summary,
             "final_model_response_event_id": final_model_response_event_id(trace),
+        }
+
+    async def _whole_run(
+        self, segment: Dict[str, Any], trace: TelemetryTrace, previous: List[str]
+    ) -> Dict[str, Any]:
+        """A resumed run's totals over all its segments.
+
+        The summary a segment ends with covers that segment alone, so a run
+        resumed once read as one model call and half its tokens and time
+        (found reading the support desk's resumed runs, 2026-10-08).
+        ``duration_ms`` is the time the segments were running, as the run
+        story sums it; ``elapsed_ms`` is from the first segment's start, the
+        wait for a person included.
+        """
+        recorder = self.telemetry_recorder
+        summaries: List[Dict[str, Any]] = []
+        starts = [trace.started_at]
+        for trace_id in previous:
+            earlier = await recorder.peek_trace(trace_id)
+            if earlier is None:
+                continue  # pruned; the count below says so
+            starts.append(earlier.started_at)
+            summaries.append((await self._run_summary(trace_id, whole_run=False))["run_summary"])
+        summaries.append(segment)
+        total: Dict[str, Any] = {}
+        for each in summaries:
+            total = _add_totals(total, each)
+        ended = trace.ended_at or datetime.now(timezone.utc)
+        return {
+            "segments": len(summaries),
+            "segments_missing": len(previous) + 1 - len(summaries),
+            # Step numbers continue across segments, so the last is the count.
+            "steps": segment["steps"],
+            "model_calls": total["model_calls"],
+            "tokens": total["tokens"],
+            "estimated_cost_usd": total["estimated_cost_usd"],
+            "cost_complete": all(each["cost_complete"] for each in summaries),
+            "model_latency_ms": total["model_latency_ms"],
+            "duration_ms": round(total["duration_ms"], 3),
+            "elapsed_ms": round((ended - min(starts)).total_seconds() * 1000, 3),
+            "including_subagents": total["including_subagents"],
         }
 
     def stream(
@@ -2089,13 +2477,9 @@ class OmniCoreAgent:
             }
         )
         if self.telemetry_recorder is None:
-            await self.memory_router.store_message(
-                role, stored_content, stored_metadata, session_id
+            await self._write_history(
+                run, role, stored_content, stored_metadata, session_id
             )
-            if run is not None:
-                await run.add_message(
-                    {"role": role, "content": stored_content, "metadata": stored_metadata}
-                )
             return
         span = await self.telemetry_recorder.start_span(
             name="memory.write",
@@ -2108,13 +2492,9 @@ class OmniCoreAgent:
             },
         )
         try:
-            await self.memory_router.store_message(
-                role, stored_content, stored_metadata, session_id
+            await self._write_history(
+                run, role, stored_content, stored_metadata, session_id
             )
-            if run is not None:
-                await run.add_message(
-                    {"role": role, "content": stored_content, "metadata": stored_metadata}
-                )
             await self.telemetry_recorder.emit_event(
                 "memory_write",
                 actor=TelemetryActor(type=ActorType.MEMORY),
@@ -2140,13 +2520,53 @@ class OmniCoreAgent:
             )
             raise
 
+    async def _write_history(
+        self,
+        run: Any,
+        role: str,
+        content: str,
+        metadata: dict | None,
+        session_id: str | None,
+    ) -> None:
+        """Write one message to the session's history and to the run's record.
+
+        A store that fails raises, and the run fails with its error. The
+        message goes on the run's record first, so a failed history write does
+        not also lose what the model said (a lost answer cannot be asked for
+        again; the record is what a person reads to see what happened).
+        """
+        if run is not None:
+            await run.add_message(
+                {"role": role, "content": content, "metadata": metadata}
+            )
+        await self.memory_router.store_message(role, content, metadata, session_id)
+
+    async def _read_session_messages(
+        self, session_id: str, agent_name: str | None
+    ) -> list[dict[str, Any]]:
+        """Read the session's history, trying again when the store errs.
+
+        Only reads are repeated: a read has nothing to duplicate, while a write
+        that failed after it committed would be stored twice. When the store
+        stays down the last error is raised and the run fails with it.
+        """
+        for delay in STORE_READ_RETRY_DELAYS:
+            try:
+                return await self.memory_router.get_messages(session_id, agent_name)
+            except Exception as exc:
+                runtime_logger().warning(
+                    f"Memory read failed ({exc.__class__.__name__}); trying again in {delay}s"
+                )
+                await asyncio.sleep(delay)
+        return await self.memory_router.get_messages(session_id, agent_name)
+
     async def _get_messages_with_telemetry(
         self,
         session_id: str,
         agent_name: str | None = None,
     ) -> list[dict[str, Any]]:
         if self.telemetry_recorder is None:
-            messages = await self.memory_router.get_messages(session_id, agent_name)
+            messages = await self._read_session_messages(session_id, agent_name)
             await _keep_run_history(messages)
             return messages
         span = await self.telemetry_recorder.start_span(
@@ -2156,7 +2576,7 @@ class OmniCoreAgent:
             input={"session_id": session_id, "agent_name": agent_name},
         )
         try:
-            messages = await self.memory_router.get_messages(session_id, agent_name)
+            messages = await self._read_session_messages(session_id, agent_name)
             await _keep_run_history(messages)
             message_digests = [stable_message_digest(message) for message in messages]
             await self.telemetry_recorder.emit_event(

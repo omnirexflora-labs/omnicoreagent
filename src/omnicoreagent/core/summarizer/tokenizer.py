@@ -5,7 +5,10 @@ Uses tiktoken when installed, with a lightweight word-count fallback for core
 installations.
 """
 
+import hashlib
 import logging
+import threading
+from collections import OrderedDict
 from functools import lru_cache
 from typing import Any
 from omnicoreagent.core.interaction_history import render_message
@@ -54,6 +57,18 @@ def get_encoding(model: str = "gpt-4") -> Any:
         return None
 
 
+# The count of a text never changes, but the same texts were counted again at
+# every step: the whole context for the context-size check, and again for the
+# budget's estimate of the next call. On the support desk ramp (2026-10-07)
+# that was 12% of the event loop's time. A count is kept by a digest of the
+# text, never by the text, so the cache holds integers and the text can be
+# freed. Short texts are encoded outright: hashing them costs about as much.
+_COUNT_CACHE_ENTRIES = 8192
+_COUNT_CACHE_MIN_CHARS = 128
+_count_cache: "OrderedDict[tuple[str, bytes], int]" = OrderedDict()
+_count_cache_lock = threading.Lock()
+
+
 def count_tokens(text: str, model: str = "gpt-4") -> int:
     """
     Count tokens in text using tiktoken.
@@ -70,7 +85,20 @@ def count_tokens(text: str, model: str = "gpt-4") -> int:
     encoding = get_encoding(model)
     if encoding is None:
         return estimate_tokens_simple(text)
-    return len(encoding.encode(text))
+    if len(text) < _COUNT_CACHE_MIN_CHARS:
+        return len(encoding.encode(text))
+    key = (model, hashlib.blake2b(text.encode("utf-8", "surrogatepass"), digest_size=16).digest())
+    with _count_cache_lock:
+        known = _count_cache.get(key)
+        if known is not None:
+            _count_cache.move_to_end(key)
+            return known
+    count = len(encoding.encode(text))
+    with _count_cache_lock:
+        _count_cache[key] = count
+        while len(_count_cache) > _COUNT_CACHE_ENTRIES:
+            _count_cache.popitem(last=False)
+    return count
 
 
 def count_message_tokens(messages: list[dict[str, Any]], model: str = "gpt-4") -> int:

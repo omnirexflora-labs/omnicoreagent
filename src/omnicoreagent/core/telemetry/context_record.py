@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
@@ -39,6 +40,11 @@ class ContextRecording:
     last: dict[str, tuple[str, list[str]]] = field(default_factory=dict)
     # (context assembly event id, its message digests)
     last_assembly: tuple[str, list[str]] | None = None
+    # content digest -> (its privacy-safe form, characters); see
+    # ``TelemetryRecorder.canonicalize_for_digest``.
+    canonical: OrderedDict = field(default_factory=OrderedDict)
+    canonical_chars: int = 0
+    canonical_token: tuple | None = None
 
 
 def digest_reference(

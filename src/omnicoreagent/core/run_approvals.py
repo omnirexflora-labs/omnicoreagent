@@ -14,12 +14,14 @@ not on what was approved.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from omnicoreagent.core.runs import current_run
+from omnicoreagent.core.metrics import COUNTERS
+from omnicoreagent.core.runs import RunStateConflict, current_run
 from omnicoreagent.governance.models import ApprovalRequest, ApprovalResult, to_plain
 
 # How long an approval can wait for a decision when the policy sets no expiry.
@@ -84,6 +86,31 @@ class RunApprovalResolver:
     """Resolves governance asks from decisions recorded on the current run."""
 
     is_static = False
+
+    def already_asked(self, approval: ApprovalRequest) -> bool:
+        """Whether this run's record already holds the question.
+
+        A resume asks the governed call again and the record answers it. That
+        is the same ask, not a new one, so the trace does not record it twice
+        (the support desk resumed runs showed each decided approval asked
+        again, under a new id, in the resumed segment).
+        """
+        run = current_run()
+        if run is None or not run.enabled:
+            return False
+        digest = request_digest(approval)
+        # Only a record that ``resolve`` would answer from. One already used
+        # for an earlier identical call is spent: a repeat of the call is a
+        # new question and is recorded as one.
+        return any(
+            r["request_digest"] == digest
+            and (
+                r["status"] != "used"
+                or (r.get("decision") == "approve" and r.get("capability") in _SESSION_SETUP)
+            )
+            and not (r["status"] == "expired" and r.get("used_at"))
+            for r in run.record.get("approvals", [])
+        )
 
     async def resolve(self, approval: ApprovalRequest) -> ApprovalResult | None:
         run = current_run()
@@ -169,6 +196,7 @@ class RunApprovalResolver:
                     )
                 return None
         metadata = approval.metadata or {}
+        COUNTERS.inc("omniserve_approvals_requested_total", risk=approval.risk_level or "unknown")
         await run.add_approval(
             {
                 "approval_id": approval.approval_id,
@@ -229,13 +257,53 @@ async def decide(
     note: str | None = None,
     arguments: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Record a person's decision on a pending approval; returns the approval."""
-    from omnicoreagent.governance.capabilities import tool_authority_requests
+    """Record a person's decision on a pending approval; returns the approval.
 
+    The record is read, changed and saved against the version read. A save by
+    someone else in between (the run's last heartbeat, which can land after
+    the run has returned to wait for this decision) is not the person's
+    problem: the record is read again, the approval is checked again (a
+    decision made meanwhile by another person stands), and the decision is
+    saved against the new version. Found by the step benchmark against
+    Postgres, 2026-10-07: one decision in 32 failed with a conflict.
+    """
     if decision not in {"approve", "deny"}:
         raise ValueError("decision must be 'approve' or 'deny'")
     if not approver or not str(approver).strip():
         raise ValueError("approver is required")
+    for _ in range(_DECIDE_TRIES - 1):
+        try:
+            return await _decide_once(
+                store,
+                run_id,
+                approval_id,
+                decision=decision,
+                approver=approver,
+                note=note,
+                arguments=arguments,
+            )
+        except RunStateConflict:
+            await asyncio.sleep(0.01)
+    return await _decide_once(
+        store, run_id, approval_id, decision=decision, approver=approver, note=note, arguments=arguments
+    )
+
+
+_DECIDE_TRIES = 10
+
+
+async def _decide_once(
+    store: Any,
+    run_id: str,
+    approval_id: str,
+    *,
+    decision: str,
+    approver: str,
+    note: str | None,
+    arguments: dict[str, Any] | None,
+) -> dict[str, Any]:
+    from omnicoreagent.governance.capabilities import tool_authority_requests
+
     record = await store.get_run_state(run_id)
     if record is None:
         raise LookupError(f"No run {run_id}")
@@ -253,6 +321,7 @@ async def decide(
         approval.update(status="expired", decided_at=utc_now().isoformat())
         version = record.pop("version")
         await store.save_run_state(record, expected_version=version)
+        COUNTERS.inc("omniserve_approvals_decided_total", decision="expired")
         raise ValueError(
             f"Approval {approval_id} expired at {approval['expires_at']}; "
             f"resuming the run refuses the call"
@@ -284,4 +353,5 @@ async def decide(
         approval["edited_arguments"] = dict(arguments)
     version = record.pop("version")
     await store.save_run_state(record, expected_version=version)
+    COUNTERS.inc("omniserve_approvals_decided_total", decision=decision)
     return approval

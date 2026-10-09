@@ -77,19 +77,19 @@ async def test_a_completed_calls_result_is_on_the_record_before_the_next_step(mo
     from omnicoreagent.core import runs
 
     agent = await _agent(ASKS(), budgets=None)
-    original_step = runs.RunTracker.step
+    original_step = runs.RunTracker.begin_step
     steps = {"n": 0}
 
     async def dies_on_the_second_step(self, number):
         steps["n"] += 1
         if steps["n"] == 2:
             raise ProcessDied()
-        await original_step(self, number)
+        return await original_step(self, number)
 
-    monkeypatch.setattr(runs.RunTracker, "step", dies_on_the_second_step)
+    monkeypatch.setattr(runs.RunTracker, "begin_step", dies_on_the_second_step)
     with pytest.raises(ProcessDied):
         await agent.run("go", session_id="crash-window", run_id="run_window")
-    monkeypatch.setattr(runs.RunTracker, "step", original_step)
+    monkeypatch.setattr(runs.RunTracker, "begin_step", original_step)
 
     record = await agent.get_run("run_window")
     [call] = record["tool_calls"]

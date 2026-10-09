@@ -216,7 +216,7 @@ shows how a trajectory reports what is missing.
 | `"memory"` | In this process only, up to `memory_max_traces` (1,000) finished traces. |
 
 The log holds the traces still running. A finished trace moves to an archive
-beside it (`telemetry/traces-archive/`): one body per trace and a SQLite
+beside it (`telemetry/traces-archive/`): trace bodies packed into segment files and a SQLite
 index, so reading one trace does not read them all. Several server processes
 can share one archive: `archive_index_url` makes the index a shared database,
 and `archive_target: "object_storage"` keeps the bodies in the workspace's

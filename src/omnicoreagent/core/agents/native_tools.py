@@ -14,6 +14,7 @@ from omnicoreagent.core.budgets import BudgetExhaustedForRun, RunAwaitingBudget
 from omnicoreagent.core.model_protocol import ModelTurn
 from omnicoreagent.core.runs import RunSuspended, current_run, waiting_for_approval
 from omnicoreagent.governance.calls import current_tool_call
+from omnicoreagent.core.tools.call_start import call_began
 from omnicoreagent.core.tools.local_tool_handler import LocalToolHandler
 from omnicoreagent.governance.calls import tool_call_metadata
 from omnicoreagent.governance.errors import GovernanceError, PolicyDeniedError
@@ -491,20 +492,43 @@ async def execute_native_turn(
                 "error_type": "cancelled",
             }
         except asyncio.TimeoutError:
-            result = {
-                "tool_name": request.name,
-                "args": {},
-                "status": "error",
-                "data": None,
-                # A tool running in a thread cannot be stopped: it may still
-                # finish and take effect after this (the 0.5.0rc5 gate: a card
-                # "failed due to a timeout" was charged).
-                "message": (
-                    "Tool execution timed out; it may still take effect, as a "
-                    "running call cannot always be stopped. Check before calling it again."
-                ),
-                "error_type": "timeout",
-            }
+            if call_began(outcome.get("call_start")) and not getattr(binding, "idempotent", False):
+                # Its function was running in a thread when the limit fired,
+                # and a thread cannot be stopped: the effect can still land.
+                # That is an unknown outcome, the same as for a call a crash
+                # cut off, not a timeout (the support desk chaos run,
+                # 2026-10-07: a customer was told a refund was not issued).
+                # A call that never began, or that is safe to repeat, keeps
+                # the plain timeout.
+                result = {
+                    "tool_name": request.name,
+                    "args": {},
+                    "status": "error",
+                    "data": None,
+                    "message": (
+                        "This call ran past its time limit and its outcome is "
+                        "unknown: it had already started and cannot be stopped, "
+                        "so it may still take effect, or may already have. It did "
+                        "not necessarily fail. Check what it did before calling "
+                        "it again, and before telling the user it failed."
+                    ),
+                    "error_type": "unknown_outcome",
+                }
+            else:
+                result = {
+                    "tool_name": request.name,
+                    "args": {},
+                    "status": "error",
+                    "data": None,
+                    # A tool running in a thread cannot be stopped: it may still
+                    # finish and take effect after this (the 0.5.0rc5 gate: a card
+                    # "failed due to a timeout" was charged).
+                    "message": (
+                        "Tool execution timed out; it may still take effect, as a "
+                        "running call cannot always be stopped. Check before calling it again."
+                    ),
+                    "error_type": "timeout",
+                }
         except Exception as exc:
             result = {
                 "tool_name": request.name,
@@ -910,6 +934,11 @@ async def _record_tool_outcome(tool_call_id: str, result: dict) -> None:
     error_type = result.get("error_type")
     if error_type in {"cancelled", "timeout"}:
         await run.tool_finished(tool_call_id=tool_call_id, outcome=error_type, state="interrupted")
+        return
+    if error_type == "unknown_outcome":
+        # A call that began and ran past its time limit (the chaos run of
+        # 2026-10-07): the word the crash rules use, kept as interrupted.
+        await run.tool_finished(tool_call_id=tool_call_id, outcome="unknown", state="interrupted")
         return
     if result.get("status", "success") == "success":
         outcome = "success"

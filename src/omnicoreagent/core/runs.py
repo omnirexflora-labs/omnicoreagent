@@ -17,11 +17,13 @@ import asyncio
 import inspect
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+from omnicoreagent.core.credentials import scrub_credentials
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.metrics import COUNTERS
 from omnicoreagent.governance.hashing import arguments_digest
 
 RUN_STATUSES = (
@@ -57,6 +59,15 @@ class RunInterrupted(Exception):
     """Someone asked the run to stop at its next step boundary."""
 
 
+class RunRequestLost(RuntimeError):
+    """A run was resumed, but the request it was started with was never stored.
+
+    Found by the support desk chaos run (2026-10-07): a run whose first memory
+    read failed was resumed without the user's message and answered a request
+    nobody had recorded. Failing is the only honest outcome.
+    """
+
+
 class RunStateUnsupported(NotImplementedError):
     """The memory store does not keep run state."""
 
@@ -78,6 +89,62 @@ def supports_run_state(store: Any) -> bool:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class ClaimHeartbeat:
+    """Keeps a claimed run's lease alive until its resume has taken over.
+
+    A sweeper claims an orphan by writing a new owner and a fresh heartbeat,
+    then the resume initializes the agent and loads the model client before
+    the run's own heartbeat starts. A cold load took about 74 s against a
+    default lease of 60 s, so a second sweeper found the lease lapsed and
+    claimed the run again (found merging the P6 tracks, 2026-10-07). This
+    refreshes the heartbeat on the claim's version until ``stop`` hands the
+    latest version to the run's tracker, whose first save then continues from
+    it.
+    """
+
+    def __init__(self, store: Any, record: dict[str, Any], *, lease_seconds: int) -> None:
+        self.store = store
+        self.run_id = record["run_id"]
+        self.record = {key: value for key, value in record.items() if key != "version"}
+        self.version: int = record["version"]
+        self.lease_seconds = lease_seconds
+        self.lost = False
+        self._lock = asyncio.Lock()
+        self._task: asyncio.Task | None = None
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._beat(), name=f"claim-heartbeat-{self.run_id}")
+
+    async def _beat(self) -> None:
+        interval = max(self.lease_seconds / 3, 0.1)
+        while True:
+            await asyncio.sleep(interval)
+            async with self._lock:
+                self.record["heartbeat_at"] = self.record["updated_at"] = _now()
+                try:
+                    self.version = await self.store.save_run_state(
+                        dict(self.record), expected_version=self.version
+                    )
+                except RunStateConflict:
+                    # Another process took the run; it is theirs now.
+                    self.lost = True
+                    logger.warning(f"Claim on run {self.run_id} was taken by another process")
+                    return
+                except Exception as exc:  # noqa: BLE001 - the next beat tries again.
+                    logger.warning(f"Heartbeat for claimed run {self.run_id} failed: {exc}")
+
+    async def stop(self) -> int | None:
+        """Stop beating; the version the record now has, or None if the claim
+        was lost. Waits for a beat in flight, so the version is never stale."""
+        async with self._lock:
+            task, self._task = self._task, None
+            if task is not None:
+                task.cancel()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        return None if self.lost else self.version
 
 
 class RunTracker:
@@ -113,6 +180,10 @@ class RunTracker:
             "agent_version": agent_version,
             "status": "running",
             "step": 0,
+            # What the user asked, kept on the record from its first save, so a
+            # resume always has it even if the message never reached the
+            # session history (the store failed first).
+            "request": None,
             "trace_ids": [],
             "tool_calls": [],
             "usage": {},
@@ -168,6 +239,12 @@ class RunTracker:
             "lease_seconds": lease_seconds,
             "interrupt_requested": False,
         }
+        if record.get("status") == "timeout":
+            # A timed-out run continued by resume() is running again: the
+            # deadline's error and side-effects list described the stop, and
+            # are rebuilt if it ends badly again.
+            tracker.record["error"] = None
+            tracker.record.pop("side_effects", None)
         return tracker
 
     @classmethod
@@ -199,6 +276,11 @@ class RunTracker:
             "error": None,
         }
         return tracker
+
+    def adopt_version(self, version: int) -> None:
+        """Continue from a newer version of the record that this process itself
+        wrote (a claim's heartbeats), so the first save still matches it."""
+        self._version = version
 
     async def _save(self) -> None:
         if not self.enabled:
@@ -259,18 +341,46 @@ class RunTracker:
                 return [], False
             if stored["version"] != self._version:
                 await self._merge_external()
-            waiting = [m for m in self.record.get("inbox", []) if not m.get("delivered")]
-            delivered = [dict(m) for m in waiting]
-            for message in waiting:
-                # The text now lives in the run's history (redacted as history
-                # is); the inbox keeps only a digest of it.
-                message["delivered"] = True
-                message["delivered_at"] = _now()
-                message["content_digest"] = arguments_digest(message.get("content"))
-                message["content"] = None
-            if waiting:
-                await self._save()
+            delivered = await self._take_inbox()
             return delivered, bool(self.record.get("interrupt_requested"))
+
+    async def begin_step(self, number: int) -> tuple[list[dict[str, Any]], bool]:
+        """The step boundary: save the new step number, and answer what
+        ``check_external`` does (steered messages, whether to stop).
+
+        The boundary was a read of the record and then a save of the step. The
+        save names the version it read, and one that finds another writer
+        merges their inbox and stop request before it goes on (``_save``), so
+        the read told nothing the save did not: a refund run on the support
+        desk made three of them for nothing (2026-10-07). A run asked to stop
+        keeps its step number: it never began this one.
+        """
+        if not self.enabled:
+            return [], False
+        async with self._lock:
+            previous = self.record["step"]
+            self.record["step"] = number
+            await self._save()
+            if self.record.get("interrupt_requested"):
+                self.record["step"] = previous
+                return [], True
+            return await self._take_inbox(), False
+
+    async def _take_inbox(self) -> list[dict[str, Any]]:
+        """Mark the waiting steering messages delivered, so they arrive once.
+        The lock is held."""
+        waiting = [m for m in self.record.get("inbox", []) if not m.get("delivered")]
+        delivered = [dict(m) for m in waiting]
+        for message in waiting:
+            # The text now lives in the run's history (redacted as history
+            # is); the inbox keeps only a digest of it.
+            message["delivered"] = True
+            message["delivered_at"] = _now()
+            message["content_digest"] = arguments_digest(message.get("content"))
+            message["content"] = None
+        if waiting:
+            await self._save()
+        return delivered
 
     def attach_trace(self, trace_id: str | None) -> None:
         """Name this segment's trace on the record before anything is saved,
@@ -392,20 +502,41 @@ class RunTracker:
         status: str,
         *,
         usage: Any = None,
-        error: BaseException | None = None,
+        error: BaseException | dict[str, Any] | None = None,
         budgets: dict[str, Any] | None = None,
+        termination_reason: str | None = None,
     ) -> None:
         async with self._lock:
             self.record["status"] = status
+            if termination_reason is not None:
+                self.record["termination_reason"] = termination_reason
             if usage is not None:
                 # A resumed run adds this segment's usage to the earlier ones.
                 self.record["usage"] = _add_usage(self.record.get("usage") or {}, _usage_dict(usage))
             if error is not None:
-                self.record["error"] = {"type": type(error).__name__, "message": str(error)}
+                # Credentials the runtime holds never reach a record that
+                # GET /runs/{id} serves. A caller that holds more redaction
+                # (the privacy filter) passes the error already as a dict.
+                described = (
+                    dict(error)
+                    if isinstance(error, dict)
+                    else {"type": type(error).__name__, "message": str(error)}
+                )
+                self.record["error"] = scrub_credentials(described)
+            if status in SIDE_EFFECT_STATUSES:
+                note_side_effects(self.record)
             if budgets:
                 # What the run spent, per scope, kept once its own counter is gone.
                 self.record["budgets"] = budgets
             await self._save()
+            # Counted once the record says it, so /prometheus never reads
+            # ahead of GET /runs/{id}. A segment that pauses counts too: the
+            # pauses are how many runs waited for a person.
+            COUNTERS.inc(
+                "omniserve_runs_finished_total",
+                status=status,
+                reason=termination_reason or "none",
+            )
 
     async def note_continuation(self, tool_call_id: str) -> None:
         """This call was paused with its worker, and runs again on resume to
@@ -531,6 +662,16 @@ class RunTracker:
             await self._save()
             return dict(waiting)
 
+    async def add_unrecorded_charges(self, charges: list[dict[str, Any]]) -> None:
+        """Keep charges the budget store could not take after the work was done.
+
+        They are on the record so a person can see what the counters do not
+        show: ``/runs/{id}/budget`` lists them per budget.
+        """
+        async with self._lock:
+            self.record.setdefault("unrecorded_charges", []).extend(charges)
+            await self._save()
+
     async def reload(self) -> None:
         """Take the stored record as current (after someone else changed it)."""
         async with self._lock:
@@ -580,6 +721,133 @@ def lease_expired(record: dict[str, Any], now: datetime | None = None) -> bool:
     lease = record.get("lease_seconds") or 60
     age = ((now or datetime.now(timezone.utc)) - datetime.fromisoformat(heartbeat)).total_seconds()
     return age > lease
+
+
+def resume_cause(record: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+    """Why a run is being resumed, read from the record it resumes from.
+
+    The cause is the state the run was left in: a decided approval
+    (``approval``), a budget decision (``budget_grant`` or ``budget_denied``),
+    a stop that was asked for (``interrupted``), or a process that stopped
+    refreshing its lease (``recovered_after_lapsed_lease``, with the owner it
+    had and how long the run sat orphaned). Added after the support desk
+    chaos run (2026-10-07), where a resumed run's trace did not say which.
+    """
+    status = record.get("status")
+    if status == "awaiting_approval":
+        return {"cause": "approval"}
+    if status == "awaiting_budget":
+        requests = record.get("budget_requests") or []
+        granted = any(request.get("status") == "granted" for request in requests)
+        return {"cause": "budget_grant" if granted else "budget_denied"}
+    if status == "interrupted":
+        return {"cause": "interrupted"}
+    heartbeat = record.get("heartbeat_at")
+    if status == "running" and heartbeat:
+        lease = record.get("lease_seconds") or 60
+        expired = datetime.fromisoformat(heartbeat) + timedelta(seconds=lease)
+        orphaned = ((now or datetime.now(timezone.utc)) - expired).total_seconds()
+        return {
+            "cause": "recovered_after_lapsed_lease",
+            "previous_owner": record.get("owner"),
+            "lease_expired_at": expired.isoformat(),
+            "orphaned_seconds": max(0, round(orphaned, 3)),
+        }
+    return {"cause": "explicit"}
+
+
+def decided_waiting(
+    record: dict[str, Any], *, grace_seconds: float, now: datetime | None = None
+) -> dict[str, Any] | None:
+    """What a waiting run was decided as, when nobody has resumed it since.
+
+    A run waiting for approval or a budget is only picked up by the sweep when
+    every decision it waits on is made (``not_resumable`` is None) and the last
+    of them is older than the grace period, which leaves a client that is about
+    to resume the time to do it. Returns ``{"decision": ..., "decided_at": ...}``
+    (``approved``, ``denied``, ``granted``, ``expired`` or ``mixed``), or None.
+
+    Found by the support desk ramp at 100 users (2026-10-07): 119 runs sat in
+    ``awaiting_approval`` with their approval ``approved``, because the resume
+    that would continue them had been answered 503 and not retried.
+    """
+    status = record.get("status")
+    if status == "awaiting_approval":
+        decisions = record.get("approvals") or []
+    elif status == "awaiting_budget":
+        decisions = record.get("budget_requests") or []
+    else:
+        return None
+    if not decisions or not_resumable(record, record["run_id"]) is not None:
+        return None
+    # A decision recorded before decided_at existed counts from the run's last
+    # save.
+    stamps = [
+        datetime.fromisoformat(
+            item.get("decided_at") or record.get("updated_at") or record["created_at"]
+        )
+        for item in decisions
+        if item.get("status") != "pending"
+    ]
+    if not stamps:
+        return None
+    decided_at = max(stamps)
+    if ((now or datetime.now(timezone.utc)) - decided_at).total_seconds() < grace_seconds:
+        return None
+    outcomes = {item.get("status") for item in decisions if item.get("status") != "pending"}
+    return {
+        "decision": outcomes.pop() if len(outcomes) == 1 else "mixed",
+        "decided_at": decided_at.isoformat(),
+    }
+
+
+# The statuses that end a run before its answer, where a client has to know
+# what the run already did: it may start a new run instead of resuming.
+SIDE_EFFECT_STATUSES = frozenset({"timeout", "failed"})
+
+
+def side_effects(record: dict[str, Any]) -> list[dict[str, str]]:
+    """The calls of a run that may have changed something outside it.
+
+    Only calls whose tool is not idempotent count: a read changes nothing. A
+    call that completed is ``success``; one that started and did not finish
+    (cancelled by a deadline, timed out, or cut off) is ``unknown``, the word
+    the durable-run rules use. A call that failed, was refused or never began
+    is left out. Arguments are not repeated: a call is named by its tool and
+    id. Found by the support desk chaos run (2026-10-07): a refund, then a
+    timeout, and a response that said nothing about the refund.
+    """
+    found = []
+    for call in record.get("tool_calls") or []:
+        if call.get("idempotent"):
+            continue
+        outcome = call.get("outcome")
+        state = call.get("state")
+        if outcome == "success":
+            kind = "success"
+        elif outcome in {"unknown", "cancelled", "timeout"} or state == "started":
+            kind = "unknown"
+        else:
+            continue
+        found.append(
+            {
+                "tool_name": call.get("tool_name"),
+                "tool_call_id": call.get("tool_call_id"),
+                "outcome": kind,
+            }
+        )
+    return found
+
+
+def note_side_effects(record: dict[str, Any]) -> None:
+    """Put the run's side effects on its record and on its error."""
+    found = side_effects(record)
+    if found:
+        record["side_effects"] = found
+        if isinstance(record.get("error"), dict):
+            record["error"] = {**record["error"], "side_effects": found}
+    else:
+        record.pop("side_effects", None)
 
 
 def not_resumable(record: dict[str, Any], run_id: str) -> str | None:

@@ -58,6 +58,20 @@ Every budget covering a run: its limit, what a person granted on top of it, what
 
 The application's, session's and agent's counters are read from the ledger (they are shared, and live on); a finished run's own counter is the one settled on its record. Empty when nothing is budgeted.
 
+### `claim_orphaned_runs`
+
+```python
+async def claim_orphaned_runs(*, limit: int = 10, max_recoveries: int = 3, decided_grace_seconds: float = 30.0) -> List[Dict[str, Any]]: ...
+```
+
+Take over this agent's runs that nobody is working on, and say which.
+
+Two kinds of run are taken. An orphan is a run still `running` whose heartbeat is older than its lease, started by this agent (by name) and not by a background supervisor, which recovers its own. A decided run is one waiting for an approval or a budget decision that a person has made, and that nobody has resumed for `decided_grace_seconds` (the client that should have called `resume` was refused or is gone). A run with a decision still pending is left waiting.
+
+Each run is claimed with the record's own version check: the claim writes a new owner and a fresh heartbeat, and a second process that read the same record fails the check and skips it, so a run is never resumed twice. A client's `resume` that read the record before the claim fails its first save the same way and is refused. Each claim is then given to `resume_claimed`. An orphan claimed `max_recoveries` times and still not finished is ended `failed` instead (it is probably what kills its process); a decided run's claim does not count.
+
+Orphans were added after the support desk chaos run (2026-10-07), where runs whose process died stayed `running` until someone called `resume`. Decided runs were added after the ramp at 100 users the same day, where 119 approved runs waited for a resume that the admission limit had answered 503.
+
 ### `cleanup`
 
 ```python
@@ -328,6 +342,14 @@ Record what a run turned out to be worth, whenever that is known.
 
 A run's own result is not its outcome: a pull request is merged an hour later, a customer accepts an answer the next day, CI runs the tests afterwards. `source` says who is reporting it (`github`, `reviewer`, an evaluator's name), `reward` is the number a trainer or an evaluator uses, `label` is what it is called, and `detail` is anything else worth keeping. A run may gather several. The outcome goes on the run's record and into its trace.
 
+### `release_claim`
+
+```python
+async def release_claim(claim: Dict[str, Any]) -> None: ...
+```
+
+Stop keeping a claim's lease alive (a claim nobody will resume, or one the run has taken over). Safe to call more than once.
+
 ### `resolve_approval`
 
 ```python
@@ -341,15 +363,25 @@ Decide an approval a run is waiting for.
 ### `resume`
 
 ```python
-async def resume(run_id: str, on_event: Any = None) -> Dict[str, Any]: ...
+async def resume(run_id: str, on_event: Any = None, *, trigger: str = 'explicit') -> Dict[str, Any]: ...
 ```
 
 Continue a run: one waiting for approval once every approval is decided (see `resolve_approval`), or one whose process stopped (its heartbeat is older than `run_lease_seconds`). Completed tool calls never run again.
 
+`trigger` says who resumed it, for the run's trace and the `omniserve_runs_resumed_total` metric: a person or client (`explicit`), or the background supervisor retrying (`background_retry`).
+
+### `resume_claimed`
+
+```python
+async def resume_claimed(claim: Dict[str, Any], on_event: Any = None) -> Dict[str, Any]: ...
+```
+
+Continue a run `claim_orphaned_runs` returned, with the same durable rules as `resume`: completed calls never run again, and a call that did not finish becomes `unknown_outcome` unless its tool is idempotent.
+
 ### `run`
 
 ```python
-async def run(query: str, session_id: Optional[str] = None, run_id: Optional[str] = None, on_event: Any = None, *, tags: Optional[List[str]] = None, provenance: Optional[Dict[str, Any]] = None, _resume: Optional[Dict[str, Any]] = None) -> Dict[str, Any]: ...
+async def run(query: str, session_id: Optional[str] = None, run_id: Optional[str] = None, on_event: Any = None, *, tags: Optional[List[str]] = None, provenance: Optional[Dict[str, Any]] = None, _resume: Optional[Dict[str, Any]] = None, _resume_cause: Optional[Dict[str, Any]] = None) -> Dict[str, Any]: ...
 ```
 
 Run the agent with a query and optional session ID.

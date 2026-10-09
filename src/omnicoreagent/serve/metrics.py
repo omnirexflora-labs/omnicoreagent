@@ -9,9 +9,37 @@ from fastapi.responses import PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.metrics import COUNTERS
 
 if TYPE_CHECKING:
     from .config import OmniServeConfig
+
+
+# Upper bounds in seconds; a request or a run step takes milliseconds to minutes.
+HISTOGRAM_BUCKETS = (
+    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300,
+)
+
+
+class _Histogram:
+    """Counts since the process started, which is what Prometheus needs.
+
+    The first version kept the last 1000 samples and reported their count and
+    sum, so under load both stopped growing at 1000 and ``rate()`` read zero
+    (the support desk ramp, 2026-10-07).
+    """
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.sum = 0.0
+        self.buckets = [0] * len(HISTOGRAM_BUCKETS)
+
+    def observe(self, value: float) -> None:
+        self.count += 1
+        self.sum += value
+        for i, bound in enumerate(HISTOGRAM_BUCKETS):
+            if value <= bound:
+                self.buckets[i] += 1
 
 
 class OmniServeMetrics:
@@ -23,21 +51,21 @@ class OmniServeMetrics:
             "omniserve_requests_success": 0,
             "omniserve_requests_error": 0,
         }
-        self.histograms: dict[str, list[float]] = {
-            "omniserve_request_duration_seconds": [],
+        self.histograms: dict[str, _Histogram] = {
+            "omniserve_request_duration_seconds": _Histogram(),
         }
         self.gauges: dict[str, float] = {
             "omniserve_active_requests": 0,
         }
+        # Callables returning ready-made exposition lines, for numbers some
+        # other part of the server owns (the run admission limit).
+        self.collectors: list[Callable[[], list[str]]] = []
 
     def inc_counter(self, name: str, value: int = 1) -> None:
         self.counters[name] = self.counters.get(name, 0) + value
 
     def observe_histogram(self, name: str, value: float) -> None:
-        observations = self.histograms.setdefault(name, [])
-        observations.append(value)
-        if len(observations) > 1000:
-            self.histograms[name] = observations[-1000:]
+        self.histograms.setdefault(name, _Histogram()).observe(value)
 
     def inc_gauge(self, name: str, value: float = 1) -> None:
         self.gauges[name] = self.gauges.get(name, 0) + value
@@ -57,15 +85,19 @@ class OmniServeMetrics:
             lines.append(f"# TYPE {name} gauge")
             lines.append(f"{name} {value}")
 
-        for name, values in self.histograms.items():
-            if not values:
+        for name, histogram in self.histograms.items():
+            if not histogram.count:
                 continue
-            count = len(values)
-            total = sum(values)
-            lines.append(f"# TYPE {name} summary")
-            lines.append(f"{name}_count {count}")
-            lines.append(f"{name}_sum {total:.6f}")
-            lines.append(f"{name}_avg {total / count:.6f}")
+            lines.append(f"# TYPE {name} histogram")
+            # Buckets are cumulative: each counts every sample at or under it.
+            for bound, seen in zip(HISTOGRAM_BUCKETS, histogram.buckets):
+                lines.append(f'{name}_bucket{{le="{bound:g}"}} {seen}')
+            lines.append(f'{name}_bucket{{le="+Inf"}} {histogram.count}')
+            lines.append(f"{name}_sum {histogram.sum:.6f}")
+            lines.append(f"{name}_count {histogram.count}")
+
+        for collect in self.collectors:
+            lines.extend(collect())
 
         return "\n".join(lines) + "\n"
 
@@ -141,6 +173,8 @@ def setup_metrics(app: FastAPI, config: "OmniServeConfig") -> None:
     _ = config
     metrics = OmniServeMetrics()
     app.state.omniserve_metrics = metrics
+    # The runtime's own counters (runs, models, budgets, approvals).
+    metrics.collectors.append(COUNTERS.prometheus_lines)
     app.add_middleware(MetricsMiddleware, metrics=metrics)
     add_prometheus_endpoint(app)
     logger.info("OmniServe: HTTP request metrics enabled")

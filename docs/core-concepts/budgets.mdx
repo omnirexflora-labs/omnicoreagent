@@ -106,12 +106,31 @@ resumed, and the call really cost $0.001321.
   </Step>
 </Steps>
 
-Counters live in the agent's memory store, next to its run records, and are
-changed with compare-and-swap, so workers sharing a Redis, SQL or MongoDB store
-share a budget and two of them cannot both spend the last dollar. With the
+Counters live in the agent's memory store, next to its run records. Every
+change is one atomic operation inside the store, with the limit check in the
+same step as the increment (one guarded `UPDATE` in SQL, one script in Redis,
+one filtered update in MongoDB), so workers sharing a Redis, SQL or MongoDB
+store share a budget, two of them cannot both spend the last dollar, and a
+hundred runs charging one application budget at once do not fail each other.
+Each hold is a record of its own, removed when the call settles. With the
 default in-memory store, a budget lasts as long as the process. A finished
 run's own `request` counter is removed and its spend kept on the run's record;
 session, agent and application counters stay.
+
+Counters written by 0.5.x are read and moved into this layout the first time
+their key is touched; nothing is lost, and nothing needs to be run.
+
+### A charge for work already done never fails the run
+
+A hold before a call can refuse the call: that is the budget doing its job. But
+once a model call or a tool call has happened, recording its charge cannot undo
+it, so a failed write does not fail the run. The write is tried again for up to
+15 seconds; if the store is still unreachable, the charge is kept as
+**unrecorded**: on the run's record (`unrecorded_charges`), in the trace as a
+`budget_charge_unrecorded` event, and as `unrecorded` in `budget_status` and
+`GET /runs/{run_id}/budget`. The counters then under-count by that amount, and
+the record is where to find out by how much. Any hold the run left standing is
+released when it ends.
 
 ## Scopes, meters and windows
 
@@ -247,7 +266,7 @@ Then, from this process or any other sharing the memory store:
 - `await agent.resume(run_id)` then continues a granted run, or ends a denied
   one cleanly.
 - `await agent.budget_status(run_id)` lists every budget covering the run:
-  `limit`, `granted`, `spent`, `reserved` and `remaining`.
+  `limit`, `granted`, `spent`, `reserved`, `unrecorded` and `remaining`.
 
 ### End instead of waiting
 
@@ -382,7 +401,7 @@ curl -s localhost:8123/runs/$RUN_ID/budget
 status:
 
 ```text
-{'scope': 'session', 'meter': 'model_calls', 'window': 'total', 'key': 'session:demo:total', 'limit': 1.0, 'granted': 0.0, 'spent': 1.0, 'reserved': 0.0, 'remaining': 0.0}
+{'scope': 'session', 'meter': 'model_calls', 'window': 'total', 'key': 'session:demo:total', 'limit': 1.0, 'granted': 0.0, 'spent': 1.0, 'reserved': 0.0, 'unrecorded': 0.0, 'remaining': 0.0}
 ['pending']
 ```
 

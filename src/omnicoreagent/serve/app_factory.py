@@ -13,6 +13,7 @@ from omnicoreagent.governance.errors import GovernanceError
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.runtime import construction
 
+from .admission import RunAdmission, ServerBusyError, default_max_concurrent_runs
 from .config import OmniServeConfig
 from .lifespan import agent_lifespan
 from .metrics import setup_metrics
@@ -62,6 +63,34 @@ def create_omniserve_app(
 
     setup_all_middleware(app, config)
     setup_metrics(app, config)
+
+    limit = config.max_concurrent_runs
+    app.state.run_admission = RunAdmission(
+        default_max_concurrent_runs() if limit is None else limit,
+        config.run_admission_wait_seconds,
+    )
+    app.state.omniserve_metrics.collectors.append(
+        app.state.run_admission.prometheus_lines
+    )
+
+    @app.exception_handler(ServerBusyError)
+    async def server_busy(request, exc: ServerBusyError):
+        # Answered before any work is done for the request, so it is safe to
+        # retry whatever the route was.
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": str(exc.retry_after)},
+            content={
+                "error": "ServerBusy",
+                "message": (
+                    f"This server is already running {exc.limit} runs at once "
+                    f"and none finished within {exc.waited:.1f} seconds. "
+                    "Retry shortly."
+                ),
+                "max_concurrent_runs": exc.limit,
+                "retry_after": exc.retry_after,
+            },
+        )
 
     @app.exception_handler(GovernanceError)
     async def policy_refused(request, exc: GovernanceError):

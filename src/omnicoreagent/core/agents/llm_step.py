@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from omnicoreagent.core.credentials import scrub_credentials
+from omnicoreagent.core.metrics import COUNTERS
 from omnicoreagent.core.continuation import continuation_summary
 from omnicoreagent.core.agents.llm_response import (
     extract_response_content,
@@ -87,6 +88,11 @@ class AgentLlmStepRunner:
             if telemetry_recorder is not None
             else None
         )
+        # Whether the failure being handled came from the model provider. The
+        # support desk chaos run (2026-10-07) labelled an internal error in
+        # budget recording `provider_error`, because everything after the
+        # call was inside this one handler.
+        calling_provider = False
         try:
             if self.limits_enabled:
                 self.usage_limits.check_before_request(usage=run_usage)
@@ -241,6 +247,7 @@ class AgentLlmStepRunner:
                         output=context_input,
                     )
 
+            calling_provider = True
             (
                 response,
                 model_call_span_id,
@@ -256,6 +263,7 @@ class AgentLlmStepRunner:
                 context_span_id=(context_span.span_id if context_span else None),
                 new_observation_event_ids=new_observation_ids,
             )
+            calling_provider = False
             session_state.delivered_observation_event_ids.update(new_observation_ids)
             if response is None:
                 raise ValueError("Provider returned no response")
@@ -304,7 +312,13 @@ class AgentLlmStepRunner:
 
             reason = account_error(e)
             wrong_model = model_error(e)
-            if reason is not None:
+            termination_reason = "provider_error" if calling_provider else "internal_error"
+            if not calling_provider:
+                error_message = (
+                    f"The run failed on an internal error ({type(e).__name__}: "
+                    f"{scrub_credentials(str(e))[:300]}); this is a fault in the runtime, not the model provider"
+                )
+            elif reason is not None:
                 error_message = (
                     f"The model call was refused: {reason}. Fix the account; "
                     "retrying will not help."
@@ -327,7 +341,14 @@ class AgentLlmStepRunner:
                     "answer": error_message,
                     "usage": run_usage,
                     "status": "error",
-                    "termination_reason": "provider_error",
+                    "termination_reason": termination_reason,
+                    # The run's record carries the cause too, so a failed run
+                    # no longer reads `error: null` with the reason only in
+                    # its trace.
+                    "error": {
+                        "type": type(e).__name__,
+                        "message": scrub_credentials(str(e))[:500],
+                    },
                 }
             )
 
@@ -482,15 +503,23 @@ class AgentLlmStepRunner:
                 else None
             )
             timing["started"] = time.perf_counter()
+            model_label = _model_label(llm_connection)
+            COUNTERS.inc("omniserve_model_calls_total", model=model_label)
             try:
                 response = await request()
-            except BaseException:
+            except BaseException as failure:
                 if held:
                     await budgets.release(held)  # nothing was spent
+                if isinstance(failure, Exception):
+                    COUNTERS.inc("omniserve_model_errors_total", model=model_label)
                 raise
             finally:
                 OUTPUT_TOKEN_CEILING.reset(ceiling_token)
                 MODEL_RETRY_OBSERVER.reset(retry_token)
+                if retries:
+                    COUNTERS.inc(
+                        "omniserve_model_retries_total", len(retries), model=model_label
+                    )
             normalized = normalize_model_turn(response)
             model_facts = self._model_call_facts(
                 llm_connection,
@@ -937,6 +966,15 @@ class AgentLlmStepRunner:
             "total_time": request_usage.total_time,
             "details": request_usage.details,
         }
+
+
+def _model_label(llm_connection: Any) -> str:
+    """The configured model's name: a small set an operator chose, never text
+    from a request."""
+    try:
+        return str((getattr(llm_connection, "llm_config", None) or {})["model"])
+    except (KeyError, TypeError):
+        return "unknown"
 
 
 def _standard_token_usage(tokens: dict[str, Any] | None) -> dict[str, Any] | None:

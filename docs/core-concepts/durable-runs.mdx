@@ -89,9 +89,16 @@ from and the messages it added), its approvals and budget requests, and the
 tool calls' arguments as a digest, not in full. A call's `outcome` is
 `success`, `error`, `denied` (refused by the policy or a person),
 `rejected` (invalid arguments), `timeout`, `cancelled`, or `unknown`
-(interrupted mid-call). `run()` returns the `run_id`;
+(interrupted mid-call, or begun and then past its time limit). `run()` returns the `run_id`;
 `get_run(run_id)` reads the record and `list_runs(session_id=, status=, limit=100)`
 lists records, oldest first.
+
+A run that ends `failed` says why on its record: `error` holds the error's
+`type` and `message` (credentials removed, personal data redacted by your
+privacy settings), and `termination_reason` says whose fault it was.
+`provider_error` is an error from the model provider; `internal_error` is a
+fault inside the runtime or a component it uses (a store, a budget ledger);
+a run that stopped on a limit says `max_steps`, `resource_limit` and so on.
 
 The default store is in memory, so here the record dies with the process. To
 resume a run anywhere else, the store must be one both processes reach:
@@ -305,6 +312,25 @@ unique id). Then a retry after a crash is a no-op at the service, and the tool
 can be declared `idempotent=True`. Tools get the id from
 `omnicoreagent.governance.calls.current_tool_call()`.
 
+### A call that runs past its time limit
+
+A plain (synchronous) tool runs in a worker thread, and a thread cannot be
+stopped. When `tool_call_timeout` fires on a call whose function **had already
+begun**, the thread carries on and its effect can land after the limit. For a
+tool that is not idempotent, that is the same situation as a crash in the
+middle of a call, and it is treated the same way: the call's `outcome` in the
+run record is `unknown`, the trace's `tool_error` event says
+`may_still_complete: true`, and the model receives an `unknown_outcome` error
+that says the call may still complete, and to check what it did before calling
+it again and before telling the user it failed. (The support desk chaos run of
+2026-10-07 had a model tell a customer "The refund was not issued" about a
+call of this kind.)
+
+Two cases keep the plain `timeout`: a call that never began (it was waiting
+for a worker thread, so cancelling it stopped it), and a call whose tool is
+idempotent. An `async` tool is cancelled at its next `await` and also keeps
+`timeout`; its message still says to check before calling again.
+
 ## What is guaranteed
 
 What a run does after its process dies, stated exactly. "Resume" means
@@ -336,8 +362,11 @@ What a run does after its process dies, stated exactly. "Resume" means
 - **Sub-agents.** A delegation is a tool call that is not idempotent, so the
   rows above apply to it. A child run left behind by a parent that stopped is
   not resumed, except a worker waiting for an approval.
-- **Background retries** after a failure, a timeout or a cancellation are new
-  attempts from the first step; only a worker that died is resumed.
+- **Background retries.** A retry after a timeout resumes the same run, so
+  completed calls are not repeated. A retry after a failure starts over only if
+  the run made no non-idempotent call; otherwise the run ends `failed`, is not
+  retried, and lists its `side_effects` for a person. A worker that died is
+  resumed.
 
 ### What each store keeps when the machine loses power
 
@@ -457,6 +486,67 @@ resume: success | Q2 revenue was 410, Q3 revenue was 455, and the change from Q2
 Both work from any process that shares the store: they write to the record,
 and the run reads it at each step.
 
+## Runs a dead process left behind
+
+By itself, nothing resumes a run whose process died: an interactive run stays
+`running`, with a lapsed lease, until something calls `resume(run_id)`
+(background runs have a supervisor that does). A server does it for you:
+**OmniServe sweeps for these runs** on start and then every
+`OMNICOREAGENT_SERVE_ORPHAN_SWEEP_INTERVAL_SECONDS` (30 by default, each wait
+varying by up to a quarter, the first one a few seconds at most, so replicas do
+not sweep together). Without OmniServe, the same two calls are yours:
+
+```python
+for claim in await agent.claim_orphaned_runs():
+    await agent.resume_claimed(claim)
+```
+
+- An orphan is a run of this agent that is `running` and whose heartbeat is
+  older than its lease. A background run is left to its supervisor.
+- A **decided run** is one in `awaiting_approval` or `awaiting_budget` whose
+  every approval is `approved` or `denied` (or whose budget request is granted
+  or denied), that no live owner holds, and that nobody has resumed for
+  `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS` (30 by default) after
+  the last decision. The sweep resumes it exactly as `resume` would, so a
+  person's decision leads somewhere even when the client that should have
+  called `resume` was refused (a `503` from the admission limit) or is gone.
+  The support desk ramp at 100 users left 119 approved runs waiting like this.
+  A run with a decision still pending is left waiting, and so is a decided run
+  inside its grace period. Pass `decided_grace_seconds=` to
+  `claim_orphaned_runs` when you sweep yourself.
+- If a client's `resume` and the sweep arrive together, the record's version
+  check lets exactly one win. The other is told the run was taken (`409` over
+  HTTP, `ValueError` from `resume`), and a call runs once.
+- A run is claimed through its record's own version check, so two replicas
+  never resume the same run, and a live run is never taken from its owner.
+- A claim keeps the run's lease alive with heartbeats until the resumed run's
+  own heartbeat takes over, so a slow start (a cold model client can take over
+  a minute) never lets a second sweeper claim the run. If you claim runs
+  yourself and do not resume one, call `agent.release_claim(claim)`.
+- A resume removes the sandboxes a dead attempt left only after it has saved
+  the run as its own, so a process that lost the claim never removes the
+  winner's sandbox.
+- A recovered run continues under the rules above: completed calls never run
+  again, and a call that did not finish becomes `unknown_outcome` unless its
+  tool is idempotent.
+- Its trace says why: the `run_resumed` event has `cause`
+  `recovered_after_lapsed_lease`, `trigger` `orphan_sweep`, the dead
+  `previous_owner`, and `orphaned_seconds`. A decided run has the `cause` an
+  explicit resume gives (`approval`, `budget_grant` or `budget_denied`), the
+  same `trigger`, and `decision` (`approved`, `denied`, `granted`) with
+  `decided_at`.
+- A run recovered `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_RECOVERIES` times (3)
+  and still not finished is ended `failed`: it is probably what stops its
+  process. Resuming a decided run does not count as a recovery.
+- At most `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_CONCURRENT` (2) recovered runs
+  work at once. When a sweep fills every slot, the next one follows as soon as
+  a slot frees, so a backlog (a hundred decided runs) is not resumed two per
+  interval.
+
+To keep the earlier behaviour, where a person or your own code resumes every
+orphan, set `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_ENABLED=false`
+(`OmniServeConfig(orphan_sweep_enabled=False)`).
+
 ## End a run nobody will resume
 
 `abandon_run(run_id, status=, reason=)` closes a run from outside: one that
@@ -524,9 +614,42 @@ the same moments in two vocabularies:
 | `awaiting_budget` | `awaiting_budget` | Waiting for a budget top-up. |
 | `interrupted` | `interrupted` | Stopped by `interrupt`; `resume` continues it. |
 | (raises) | `cancelled` | The task running it was cancelled, or `abandon_run(status="cancelled")`. |
-| — | `timeout` | A deadline passed: OmniServe's request timeout, a background task's `timeout_seconds`, the headless CLI's `--timeout`, or `abandon_run(status="timeout")`. The record's error is `The run's deadline passed`. |
+| — | `timeout` | A deadline passed: OmniServe's request timeout, a background task's `timeout_seconds`, the headless CLI's `--timeout`, or `abandon_run(status="timeout")`. The record's error is `The run's deadline passed`. `resume(run_id)` continues it ([below](#a-run-that-ends-after-side-effects)). |
 | — | `running` | Running now, or its process died (the heartbeat says which). |
 | — | `abandoned` | A worker started by `spawn_subagents` whose process died and whose lead run has ended. The record's error names the lead's run. |
+
+### A run that ends after side effects
+
+A run that ends `timeout` or `failed` after it made calls that are not
+idempotent says so, on its record and in its error:
+
+```python
+run = await agent.get_run("run_support_7")
+print(run["status"], run["error"]["type"])
+print(run["side_effects"])
+```
+
+```text
+timeout TimeoutError
+[{'tool_name': 'issue_refund', 'tool_call_id': 'call_1', 'outcome': 'success'}]
+```
+
+`side_effects` lists each call of a tool that is not idempotent whose `outcome`
+is `success` (it completed) or `unknown` (it started and did not finish, or ran
+past its time limit). It names the tool and the call, never the arguments, and
+reads are left out. The same list is in the run's `error` and in everything
+OmniServe answers for the run ([OmniServe](/docs/how-to-guides/omniserve#the-request-timeout)).
+The support desk chaos run (2026-10-07) had a refund issued, then a deadline on
+the next model call; the client saw only the timeout.
+
+After a timeout or a failure, look at the side effects. To continue, **resume
+the run**: `resume(run_id)` (`POST /runs/{run_id}/resume` over HTTP) continues
+a `timeout` run as it does an interrupted one. Calls that completed are not run
+again, and a call whose outcome is unknown is handled by the rules above. A
+`failed` run cannot be resumed, and **a new run starts over**: it can repeat
+every call in the list. So `run(query, run_id=...)` on a finished, failed or
+timed-out run, which begins a new attempt, is not the way to continue; for a
+failed run, read the list and decide what the new run must not repeat.
 
 ## One story per run
 
@@ -722,6 +845,22 @@ Methods, each in the [OmniCoreAgent reference](/docs/reference/omnicoreagent):
     ```text
     ValueError: status must be cancelled, failed or timeout
     ```
+  </Accordion>
+
+  <Accordion title="RunRequestLost: … its request was never stored">
+    `resume` on a run whose request is on neither its record nor its history:
+
+    ```text
+    RunRequestLost: Run run_order_1042 cannot be resumed: its request was never stored
+    ```
+
+    A run keeps the user's request on its record from its first save, so a
+    resume after the memory store failed mid-request still has it. A record
+    written before that, whose message never reached the history, has
+    nothing to answer, so the resume refuses and the run ends `failed`. Start
+    the request again. A memory read that fails at the start of a run is
+    tried again (twice, over about two seconds) before the run fails with the
+    store's error.
   </Accordion>
 
   <Accordion title="The model says a call's outcome is unknown">

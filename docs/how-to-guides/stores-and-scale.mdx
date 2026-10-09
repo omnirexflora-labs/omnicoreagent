@@ -130,16 +130,19 @@ disk:
 
 ```text
 ./agent.db
-./workspace/telemetry/traces-archive/.bodies.locks/9155934a567bf748a841190093541d14.lock
-./workspace/telemetry/traces-archive/.bodies.locks/b29a3de7565d810cf27591313f407969.lock
-./workspace/telemetry/traces-archive/bodies/trace_c111931bb26f42618f2ff7d1015d36e7.json
-./workspace/telemetry/traces-archive/bodies/trace_e1cf65fb2f68422490ebb404e055808e.json
+./workspace/telemetry/traces-archive/bodies/segments/2026100814-003fd48d15fa14cc.seg
+./workspace/telemetry/traces-archive/bodies/segments/2026100814-003fd48e9b2e07a1.seg
 ./workspace/telemetry/traces-archive/index.sqlite
 ./workspace/telemetry/traces.jsonl
 ```
 
-`agent.db` holds three tables: `messages` (session history), `run_states`
-(run records) and `budget_states` (budget counters). The traces are the
+Each process wrote its finished traces into a segment of its own (the hour, then
+the writer: a process id and a random token), not one file per trace. There are
+no lock files, because a segment has one writer.
+
+`agent.db` holds, among others, `messages` (session history), `run_states`
+(run records), and `budget_meters`, `budget_holds` and `budget_grants` (budget
+counters, the holds on them, and top-ups). The traces are the
 `workspace/telemetry/` files.
 
 <Note>
@@ -178,8 +181,12 @@ History windows and summaries: [Memory](/docs/core-concepts/memory).
 
 ### Traces
 
-Each finished run's trace moves from a write-ahead log to an **archive**: one
-body per trace, and an index to find them.
+Each finished run's trace moves from a write-ahead log to an **archive**: a
+body per trace, and an index to find them. In a local directory the bodies are
+packed into **segment files**, one per writer process per hour
+(`bodies/segments/<hour>-<writer>.seg`), and the index records where in a
+segment each body sits, so a busy server keeps hundreds of files a month and
+not millions. A bucket keeps one object per trace.
 
 | `telemetry_config` | Default | What it does |
 |---|---|---|
@@ -188,6 +195,19 @@ body per trace, and an index to find them.
 | `archive_index_url` | none: `index.sqlite` in the archive | A database URL, so several processes share one index |
 | `archive_bodies_path` | none: `bodies/` in the archive | A directory the processes share (one host, or a shared volume) |
 | `archive_target` | `"local"` | `"object_storage"`: bodies in the S3 or R2 bucket of the agent's workspace |
+
+Replacing a trace appends a new copy; the old bytes are dead until their
+segment goes. Retention deletes a segment once no trace in the index points into
+it, and never the one a process is still writing. An archive written by 0.5.1 or
+earlier, with one `trace_*.json` file per trace, is still read and pruned as it
+was; nothing is rewritten.
+
+A busy deployment should not use the local archive as its long-term store.
+Send each finished trace to a backend built for them with a
+[trace exporter](/docs/how-to-guides/configuration#trace-exporters)
+(`telemetry_exporters=[{"destination": "otlp", ...}]`, to Jaeger, Tempo or any
+OTLP/HTTP collector), and shorten the local window with
+`telemetry_config["retention_days"]` (7 by default).
 
 The trace log stays on local disk even when the workspace is S3 or R2. A
 process that reads another's run needs its traces: run both in one directory
@@ -263,12 +283,13 @@ shared archive. What was left on disk:
 ```text
 ./server-a/traces.jsonl
 ./server-b/traces.jsonl
-./shared/.bodies.locks/6f8deb7b26402ae6206e06ebeb8a45fa.lock
-./shared/.bodies.locks/b18851d4ddc6caf465f7b958e73ebd79.lock
-./shared/bodies/trace_0b117c9bcaa04202a194a5354f717e8b.json
-./shared/bodies/trace_91c25e3c8d9a43eaa6ad0c70caac8da4.json
+./shared/bodies/segments/2026100814-003fd48d15fa14cc.seg
+./shared/bodies/segments/2026100814-003fd48e9b2e07a1.seg
 ./shared/index.db
 ```
+
+Each server appended to its own segment in the shared directory, so they
+needed no lock between them.
 
 An archive that
 cannot be written to never fails a run: the trace stays in the log, and the

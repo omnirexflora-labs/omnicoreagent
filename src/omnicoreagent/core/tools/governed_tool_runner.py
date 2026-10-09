@@ -10,6 +10,7 @@ from omnicoreagent.core.telemetry.recorder import redacts_governed_arguments
 from omnicoreagent.core.types import (
     ToolCallResult,
 )
+from omnicoreagent.core.tools.call_start import call_began, tracking_call_start
 from omnicoreagent.core.tools.tool_observation_guardrail import scrub_tool_results
 from omnicoreagent.governance.calls import on_behalf_of
 from omnicoreagent.governance.capabilities import tool_authority_requests
@@ -33,6 +34,23 @@ class GovernedToolRunner:
         self.governance_engine = governance_engine
 
     async def execute(
+        self,
+        *,
+        telemetry_outcome: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Authorize and execute one call (see ``_execute``).
+
+        The call's start box is opened here, and put in ``telemetry_outcome``
+        as ``call_start``, so the caller can tell after a timeout whether the
+        function had begun (a thread cannot be stopped; the chaos run of
+        2026-10-07).
+        """
+        outcome = telemetry_outcome if telemetry_outcome is not None else {}
+        with tracking_call_start(outcome.setdefault("call_start", {})):
+            return await self._execute(telemetry_outcome=outcome, **kwargs)
+
+    async def _execute(
         self,
         *,
         single_tool: ToolCallResult,
@@ -280,12 +298,19 @@ class GovernedToolRunner:
                         "type": "TimeoutError",
                         "message": "Tool execution exceeded its time limit",
                     }
+                    # A function that had begun in a thread is still running:
+                    # the trace says its effect may land after this record.
+                    began = call_began(outcome.get("call_start"))
                     timeout_event = await telemetry_recorder.emit_event(
                         telemetry_shape["error_event"],
                         actor=telemetry_shape["actor"],
                         input=telemetry_input if telemetry_shape["single_event"] else None,
                         error=timeout_error,
-                        metadata={**relationship_metadata, "phase": "timeout"},
+                        metadata={
+                            **relationship_metadata,
+                            "phase": "timeout",
+                            **({"may_still_complete": True} if began else {}),
+                        },
                     )
                     outcome["tool_result_event_id"] = timeout_event.event_id
                     await telemetry_recorder.end_span(

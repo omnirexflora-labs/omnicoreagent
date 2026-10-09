@@ -1,0 +1,32 @@
+# Adds Jaeger to the support desk and points the desk's OTLP exporter at it.
+#
+#   docker compose -p <name> \
+#     -f apps/support_desk/compose.yml -f apps/support_desk/observe/compose.override.yml up -d
+#
+# The desk keeps its own trace store as before; the exporter sends each
+# finished trace to Jaeger as well, over OTLP/HTTP on the Compose network.
+# Jaeger's UI is published on loopback only (default 16686, set with
+# DESK_JAEGER_PORT). Its store is in memory: it is for one check, not a record.
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      # Enough that a long chaos run's traces are still there to be read.
+      - MEMORY_MAX_TRACES=200000
+    ports:
+      - "127.0.0.1:${DESK_JAEGER_PORT:-16686}:16686"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:14269/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  desk:
+    environment:
+      - DESK_OTLP_ENDPOINT=http://jaeger:4318
+    depends_on:
+      jaeger:
+        condition: service_healthy

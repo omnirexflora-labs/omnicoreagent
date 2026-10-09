@@ -178,3 +178,29 @@ def test_an_unknown_status_is_refused_not_an_empty_list(tmp_path):
         assert "awaiting_approval" in refused.text  # the valid ones are named
         assert client.get("/runs", params={"status": "awaiting_budget"}).status_code == 200
         assert client.get("/runs", params={"status": "timeout"}).status_code == 200
+
+
+def test_an_approval_that_cannot_be_saved_for_a_conflict_is_retryable(tmp_path, monkeypatch):
+    # The paused run's own writes can keep changing its record while a decision
+    # is saved; ``decide`` re-reads and retries, and if that ever runs out the
+    # decision was not saved. The route said 500 for it (found reading the
+    # code after the support desk soak, 2026-10-08): the client should be told
+    # to send the same decision again, not that the server broke.
+    from omnicoreagent.core.runs import RunStateConflict
+
+    agent, server = _server(tmp_path, WRITE_AND_DELETE, DELETE, "done")
+    with TestClient(server.app) as client:
+        paused = _pause(client)
+        (approval,) = paused["approvals"]
+
+        async def conflicted(*args, **kwargs):
+            raise RunStateConflict("run changed since version 11")
+
+        monkeypatch.setattr(agent, "resolve_approval", conflicted)
+        answer = client.post(
+            f"/runs/{paused['run_id']}/approvals/{approval['approval_id']}",
+            json={"decision": "approve", "approver": "alice"},
+        )
+        assert answer.status_code == 503, answer.text
+        assert answer.headers.get("retry-after") == "1"
+        assert "again" in answer.json()["detail"]

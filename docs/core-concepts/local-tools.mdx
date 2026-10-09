@@ -355,8 +355,19 @@ your tools names from your domain, such as `fetch_invoice` or
 
     A timed-out call may still finish and take effect: a plain (synchronous)
     function runs in a thread that cannot be stopped, so it carries on after
-    the limit. The model is told so ("it may still take effect… Check before
-    calling it again"), not that it failed; the trace records it as `timeout`.
+    the limit. What the runtime says depends on whether the function had
+    begun and whether the tool is idempotent:
+
+    | The call | The run record | The model is told |
+    |---|---|---|
+    | Began, and the tool is not idempotent | `unknown` | `unknown_outcome`: *"its outcome is unknown… Check what it did before calling it again, and before telling the user it failed."* The trace's `tool_error` event has `may_still_complete: true`. |
+    | Began, and the tool is idempotent | `timeout` | `timeout`: it may still take effect; check before calling again |
+    | Never began (it was waiting for a worker thread) | `timeout` | `timeout` |
+    | An `async` tool | `timeout` | `timeout` |
+
+    An `async` tool is cancelled at its next `await`, so it normally stops; one
+    that already sent a request before the limit may have had an effect, which
+    is why even its `timeout` message says to check before calling again.
     Give a tool with side effects a way to check (a list or lookup tool), and
     raise the timeout or make the tool return sooner (start the work and
     return a handle the model can check later).

@@ -9,6 +9,310 @@ icon: 'clock-rotate-left'
 Every release, with its notes, is also on
 [GitHub Releases](https://github.com/omnirexflora-labs/omnicoreagent/releases).
 
+## Unreleased
+
+### Fixed
+
+- **A resumed run's final summary covers the whole run.** The `run_summary` on its `final_answer`
+  event described the last segment only: a run that took two segments, two model calls and 24
+  tokens read as one call and 12 tokens. It now also carries `run_summary["whole_run"]`: every
+  segment's steps, model calls, tokens and cost, `duration_ms` (the time the segments ran) and
+  `elapsed_ms` (from the first start, the wait for a person included). `run_summary` itself is
+  still the final segment's.
+
+- **A resumed run's trace no longer asks twice, or reports a pause as an error.** The resumed
+  segment recorded an `approval_request_created` event again, under a new id, for an approval the
+  record already held; it is now recorded once, in the segment that paused (the decision is still
+  an `approval_resolved` in the resumed one). A call waiting for a person now has `error: null` in
+  the trajectory (its outcome was already `awaiting_approval`), and an OTLP backend no longer sees
+  a skipped span (waiting for approval, or stopped by a budget) as an error: its status is unset
+  and it carries no `error.type`.
+
+- **`/prometheus` says what runs, models, budgets and approvals did.** A server under load
+  showed only request counts. It now also counts runs finished by status and reason, runs resumed
+  by trigger and cause (a client, the orphan sweep, a background retry), model calls, errors and
+  retries by model, budget refusals, and approvals asked and decided
+  (`omniserve_runs_finished_total`, `omniserve_runs_resumed_total`, `omniserve_model_*_total`,
+  `omniserve_budget_refused_total`, `omniserve_approvals_*_total`). Labels are bounded sets; none
+  carries a run id, session id or tool argument. `OmniCoreAgent.resume()` takes a `trigger`
+  (default `explicit`) that the supervisor sets to `background_retry`.
+
+- **`/prometheus` request-duration counts keep growing.** `omniserve_request_duration_seconds_count`
+  and `_sum` were worked out from the last 1000 requests, so under load both stopped at 1000 and
+  `rate()` read zero. They now count since the server started, as a Prometheus histogram: `_bucket`
+  (with `le` bounds from 5 ms to 5 minutes), `_sum` and `_count`. The non-standard `_avg` line is
+  gone; use `_sum / _count`.
+
+- **The trace archive no longer leaves a lock file for every trace.** Local workspace storage
+  kept one lock file per path and never removed it, so the support desk's archive made two files
+  for each trace. In a server soak (2026-10-08) the Python heap was flat, but the container's
+  memory still rose about 2 MiB a minute: the rest was the kernel's cache of the inodes and
+  names of those files, which the container is charged for. A path now maps to one of 256 lock
+  files, so the number of locks is fixed however many files are written. Old lock files are
+  left alone and can be deleted. A write that worked also no longer looks for its temp file
+  afterwards, which had left the kernel a remembered name for every body.
+
+- **A background retry no longer repeats a side effect.** A task whose `retry_on` includes
+  `timeout` or `exception` started a new attempt on a retry, and a new attempt wipes the run's
+  tool calls: a refund job that timed out after issuing the refund would issue it again. A retry
+  after a timeout now resumes the same run (completed calls are not run again; a cut-off
+  non-idempotent call is `unknown`). A failed run cannot be resumed, so it is retried from the
+  start only if it made no non-idempotent call; otherwise it ends `failed` with an error saying it
+  was not retried, and `run.metadata["side_effects"]` lists the calls for a person to decide.
+
+- **A run that times out or fails after side effects says what already happened.** In the
+  provider-hang rounds of the support desk chaos run, a refund was issued and the run then hit its
+  deadline on the next model call; the client saw only `timeout`, and a client that started a new
+  run could refund twice. The run's record and its `error` now carry `side_effects`: each
+  non-idempotent call that completed (`success`) or has an `unknown` outcome, by tool name and
+  call id, never its arguments. OmniServe returns it in the `504` of `/run/sync`, in a `/run/sync`
+  answer with `status: error`, in the SSE `error` and `complete` events, and in `GET /runs/{id}`.
+  `resume(run_id)` now also continues a run that ended `timeout` (it did not before), so the
+  documented way on is to resume: completed calls are not repeated. A `failed` run still cannot be
+  resumed, and a new run starts over.
+
+- **A call that began and then timed out is `unknown`, not a timeout.** A plain tool runs in a
+  thread that cannot be stopped; when `tool_call_timeout` fired on a non-idempotent call that had
+  already begun, its effect could land afterwards while the record said `timeout` and the model
+  told a customer "The refund was not issued" (the support desk chaos run). The call is now
+  `unknown` in the run record, the trace's `tool_error` event has `may_still_complete: true`, and
+  the model receives an `unknown_outcome` error that says to check before acting again or telling
+  the user it failed. A call that never began, an idempotent tool and an `async` tool keep
+  `timeout`.
+
+- **An approved run no longer waits forever for a resume that never comes.** At 100 users the
+  admission limit answered some `POST /runs/{id}/resume` with `503`, the client did not retry, and
+  119 runs sat in `awaiting_approval` with their approval already `approved`. The orphan sweep
+  skipped every run waiting for a person. It now also resumes a run in `awaiting_approval` or
+  `awaiting_budget` whose every decision is made, that no live owner holds, and that has sat
+  unresumed for `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS` (30 by default). The claim
+  is the same version-checked claim, and the `run_resumed` event has `trigger` `orphan_sweep` and a
+  `cause` and `decision` naming what was decided. A client resume that arrives with the sweep loses
+  cleanly (`409`) and the tool runs once. A run with a decision still pending is left alone.
+  `claim_orphaned_runs` takes `decided_grace_seconds`. A sweep that fills every slot is followed
+  by the next as soon as a slot frees, so a backlog is not resumed two runs per interval. The
+  support desk load client now waits out a `503` with `Retry-After`, reports 503s seen, retried
+  successes and give-ups apart, and gives the sweep its grace period before it judges a refund.
+
+- **A crowd of runs on one budget no longer fails.** Every budget change was a read, a change in
+  Python and a versioned write of one JSON row per budget key, holding every in-flight run's hold.
+  On the support desk ramp (100 concurrent runs on one application budget) the row conflicted
+  constantly, the retries ran out, and 46 runs failed with `Could not record the budget change`,
+  reported as `provider_error` with `error: null`; ten of them had already issued a refund. Each
+  change is now one atomic operation in the store: a guarded `UPDATE ... SET spent = spent + x`
+  in SQL (one row per key and meter, one row per hold), a Lua script in Redis, a filtered
+  `find_one_and_update` in MongoDB, a lock-free in-process step in memory. The limit check and the
+  hold are one step, so no more than the limit is ever held or spent. 200 concurrent runs on one key
+  now finish with the exact total and no hold left.
+- **A charge for work already done never fails the run.** If the store cannot take the charge for a
+  model call or the seconds a sandbox ran, it is tried again for up to 15 seconds and then kept as
+  unrecorded: on the run record (`unrecorded_charges`), as a `budget_charge_unrecorded` trace event
+  and as `unrecorded` in `budget_status` and `GET /runs/{run_id}/budget`. A hold before a call can
+  still refuse the call. Holds a run could not release are released when it ends.
+- **Redis waits for a free connection** instead of raising `MaxConnectionsError` when more than 20
+  operations are in flight.
+
+- **A provider 500 is retried, and `Retry-After` is obeyed.** Twelve 500s
+  failed twelve runs in the support desk chaos run, and a 429 asking for 3
+  seconds was retried after about 1. Transient provider errors (429, 500,
+  502, 503, 504, 529, timeouts, dropped connections) are retried with
+  backoff and jitter; `Retry-After` is a floor (capped at 60 seconds), and a
+  wait that would pass the run's deadline is not started. Other 4xx errors
+  still fail at once.
+- **A failed run's record says why, under the right cause.** Failed runs read
+  `error: null`, with the cause only in the trace, and an internal error in
+  budget recording was labelled `provider_error`. Every run that ends `failed`
+  now records its `error` (type and message, credentials removed and
+  privacy-redacted) and its `termination_reason` on `get_run` and `list_runs`.
+  `provider_error` is reserved for the model provider; a fault in the runtime
+  or a component it uses is `internal_error`.
+- **`run_resumed` says why.** The event carries `cause` (`approval`,
+  `budget_grant`, `budget_denied`, `interrupted`,
+  `recovered_after_lapsed_lease`) and `trigger`; a recovered run adds the
+  `previous_owner`, `lease_expired_at` and `orphaned_seconds`.
+- **A request is never lost when the memory store fails at the start of a
+  run.** A run whose first memory read failed (Postgres restarting) was
+  resumed without the user's message and answered a refund request nobody had
+  recorded. The request is now on the run's record from its first save, a
+  resume puts it back in the history, a record with no request is refused
+  (`RunRequestLost`, the run ends `failed`), and a failed memory read is tried
+  again twice before the run fails with the store's error.
+- **Budget writes in the SQL store survive a dropped connection.** With the
+  per-checkout ping gone, a restarted database failed the first budget
+  statement on each pooled connection. Budget reads, the legacy-counter move
+  and budget changes now retry once on a fresh connection. A change is retried
+  only if its transaction had not begun to commit, so a charge that did
+  commit is never applied twice.
+- **A message the store could not write is an error.** The SQL, Redis and
+  MongoDB stores logged a failed `store_message` and returned, so a request or
+  an answer that was in no history looked stored. The write now raises and the
+  run fails with the store's error. The message goes on the run's record
+  first, so a failed history write does not also lose the answer. A custom
+  memory store should raise from `store_message` too.
+- **SQLite takes concurrent runs, and `sqlite://` works.** Fifty runs saving
+  at once on a SQLite file raised `database is locked`. File databases now run
+  in WAL mode with a 30 second busy timeout. `DatabaseMessageStore("sqlite://")`
+  (in memory) failed on pool arguments SQLite's in-memory pool rejects; it now
+  uses one shared connection that sessions take in turn.
+- **A slow resume no longer lets a second sweeper claim the same run.** A
+  claimed orphan's lease started at the claim, but the resume can take longer
+  than a lease to start (a cold model client took 74 s against 60 s), and a
+  second sweeper then claimed the run again. The claim now keeps the lease
+  alive until the run's own heartbeat takes over. Separately, `resume` removed
+  the dead attempt's sandboxes before it saved the run as its own, so a
+  process that lost the claim could remove the winner's sandbox; it now does so
+  only after winning the save. New `release_claim(claim)` on the agent for a
+  claim you will not resume.
+- **MongoDB opens one connection, not one per concurrent first call.** Fifty
+  calls arriving before the first connection was ready each opened a client,
+  and all but one were leaked. The calls now wait for a single connect.
+
+- **A person's approval is not lost to the run's last heartbeat.** A run waiting for approval stops
+  its keep-alive as it returns, but a heartbeat already sent to the database can still land after
+  it and change the record's version between the moment the decision reads the record and the
+  moment it saves it. With 32 refund runs at once on Postgres, one decision in the benchmark failed
+  with `RunStateConflict: ... changed since version 11`, about a record the approver had not
+  touched. Deciding now reads the record again, checks the approval again (a decision another
+  person made meanwhile stands) and saves against the new version, up to ten times.
+
+- **A session's state is released when its run ends.** The agent kept a `SessionState` for every
+  session that ever ran, with the last run's messages and its loop detector, for the life of the
+  process. In a 30-minute server soak of the support desk (20 users, 2,233 visits) memory rose
+  2.6 to 2.8 MiB a minute with no plateau. Locally the same flow left about 48 more allocated
+  blocks per visit (81 against 33). The store now drops the session when the run leaves, on every
+  exit: completed, failed, cancelled, suspended.
+
+- **A decision that could not be saved is retryable, not a 500.** `POST /runs/{run_id}/approvals/{approval_id}`
+  answered 500 when the paused run's own writes kept changing its record past `decide`'s re-reads. Nothing
+  was saved in that case, so it now answers `503` with `Retry-After: 1`; send the same decision again.
+
+### Changed
+
+- **A local trace archive packs bodies into segment files.** It kept one file per finished
+  trace, about 4.7 a visit for 30 days: millions of files, and kernel inode and name caches
+  that grew with them. Bodies are now appended to `bodies/segments/<hour>-<writer>.seg`, one
+  segment per process per hour, and a trace's index row records its offset and length. A segment
+  is deleted when no trace points into it. Archives written by 0.5.1 and earlier are still
+  read and pruned; nothing is rewritten. Object storage keeps one object per trace. For a busy
+  deployment, [export traces](/docs/how-to-guides/stores-and-scale#traces) and shorten
+  `retention_days`.
+
+- **A call's budgets go to the store in one transaction, not one per scope.** A model call holds
+  its cost on the request, session and application counters and settles all three afterwards, and
+  each was its own thread hop and commit: 27 of the 60 database transactions of one support desk
+  refund run (a lookup, a refund, an approval and a resume, with three budget scopes). SQL and the
+  in-memory store now apply every scope of a call together, all or none, locking rows in key order;
+  a refusal on any scope applies nothing, and the first refusal in scope order (request first) is
+  the one reported. The desk run now makes 11 budget transactions. Settling a request and
+  releasing a resumed run's old holds also take every scope in one call, and the end of a run reads
+  its counters in one read. Redis and MongoDB keep one call per key: Redis keeps each key under its
+  own hash tag, so one script cannot span keys on a cluster, and MongoDB's multi-document
+  transactions need a replica set; their calls are asynchronous and cheap, and each is already
+  atomic. A custom store may offer `apply_budget_changes`, `get_budget_states` and set
+  `batches_budget_changes = True` (see `AbstractMemoryStore`); without them nothing changes.
+- **A step boundary is one write, not a read and a write.** Each step began by reading the run's
+  record to look for steering messages and a request to stop, then saved the new step number. The
+  save already names the version it read and, finding another writer, merges their inbox and stop
+  request, so the read told nothing the save did not: three reads per refund run. The boundary is
+  now the save alone. A run asked to stop keeps its step number, a steering message is delivered
+  once, and a run another process has taken over still cannot begin a step. The end of a run no
+  longer reads its own record back to look for workers when it started none, and an ID made by
+  `generate_run_id()` is not looked up before its run (nothing can be stored under it yet).
+- **The SQL store's database calls run on their own threads.** They shared the event loop's default
+  executor with every other `asyncio.to_thread` in the process, capped at `min(32, CPUs + 4)` (6 on
+  a 2-core container) however many connections the pool allowed; on the support desk ramp most
+  active samples were database threads waiting. The store now has one thread for each connection its
+  pool can lend (`pool_size + max_overflow`), so database waits neither queue behind a tool's file
+  read nor hold it up. The caller's context variables still reach the thread.
+- **Token counts and redactions are kept, not worked out again.** The support desk ramp profiled the
+  event loop: privacy redaction 14-28% of its time and token counting about 12%, mostly the same
+  content handled again at every step. A text's token count and a text's redaction are now kept by
+  a digest of the content (never the text) in bounded caches, so the cache holds integers and
+  already-redacted text. What is counted and redacted is unchanged.
+- **A message's privacy-safe digest form is worked out once per trace.** Each step digested the whole
+  context again, and each message was redacted, scrubbed and masked three times over (the context
+  events, the model call's evidence, each message's own digest): about 19% of the event loop on the
+  support desk ramp. The form is kept for the length of its trace, bounded, and dropped when a
+  credential is registered or the redaction policy changes; a message is also put in canonical form
+  once, not twice, when a model call's context is described. The digests the trace records are
+  byte for byte what they were. A resumed run still records its run configuration in its own trace:
+  each segment's trace is read on its own (the trajectory header and the version metadata are per
+  trace), so it is made cheap instead of skipped.
+- **Telemetry IDs no longer cost a system call each.** An event or span gets an ID (about forty to a
+  step), and `uuid4()` asked the operating system for random bytes every time. A thread returning
+  from a system call has to win the interpreter lock back, which with the database threads busy
+  waits up to the switch interval: sampled on a loaded machine, ID generation was a fifth of the
+  event loop's busy time. One read of the same source now serves 256 IDs (a forked child starts a
+  new block). IDs are as random as before and keep the version-4 shape.
+- **A budget transaction sends fewer statements.** On a remote database each statement is a round
+  trip, and a transaction is several. Where the database can answer a `DELETE` or an `UPDATE` with
+  the row it changed (PostgreSQL, SQLite 3.35 and later), a hold is removed in one statement (not a
+  `SELECT` and a `DELETE`), and a meter's new total comes back with its `UPDATE` (not a `SELECT`
+  afterwards). A refund run's budget statements went from 72 to 52. Other databases are asked the
+  long way and give the same answers.
+- **Budget storage layout.** SQL stores gain the tables `budget_meters`, `budget_holds` and
+  `budget_grants`; Redis and MongoDB keep counters under new keys (`omnicoreagent_budget2:`,
+  `<collection>_budgets`). Counters written by 0.5.x are moved on first touch; do not run 0.5.x and
+  this version against the same store at once. A custom memory store that implements budgets must
+  now implement `apply_budget_change`, `get_budget_grant_history` and `list_budget_holds` (see
+  `AbstractMemoryStore`); without them, budgets are off for that store, as before.
+
+
+- **OmniServe takes only as many concurrent runs as one process can serve well.** On a 2-core
+  container every request was accepted and all of them slowed down together (chat p50 37 s at 100
+  users; throughput 3-4.5 requests a second). A process now admits 24 concurrent runs, the knee
+  measured on a server: one process gave 5.1/s at 24 users and 5.5/s at its peak, then slowed down
+  (p95 22.8 s at 64), and it used about one core whatever the cap. The limit does not scale with
+  CPUs; scale out with one replica per core behind a load balancer sharing the store (two 1-CPU
+  replicas peaked at 9.4/s against 5.5/s for one process, with every refund done exactly once).
+  `apps/support_desk/scale/` has the example. A request over the limit waits up to 5 seconds for a
+  slot, then gets `503` with `Retry-After` before any work starts. Only `/run`, `/run/sync`,
+  `/runs/{run_id}/resume` and `/background/tasks/{task_id}/run` count; health, `/prometheus`,
+  reads and approvals never wait. Set `OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS` (`0` or `none`
+  for no limit) and `OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT`. `/prometheus` gains
+  `omniserve_runs_in_flight`, `omniserve_runs_waiting`, `omniserve_runs_limit` and
+  `omniserve_runs_rejected_total`. Callers that sent more than the limit at once now see `503`
+  and should retry.
+- **The SQL memory store does less per operation.** About 45% of a 30-user profile was its
+  per-operation work: a `SELECT 1` ping on every checkout, a `BEGIN` and a `ROLLBACK` around every
+  read, and a fixed 20+30 pool. It no longer pings; reads run on their own autocommit pool, so a
+  read sends one statement; the pool is 10 plus up to 22 overflow
+  (`OMNICOREAGENT_SQL_POOL_SIZE`, `OMNICOREAGENT_SQL_MAX_OVERFLOW`, or `pool_size` and
+  `max_overflow` on `DatabaseMessageStore`). A connection the server dropped is survived by running
+  the operation once more on a new connection, which loses no message; a write is never repeated
+  once its commit has begun. `clear_memory` also no longer blocks the event loop.
+- **Resuming a run no longer lists the telemetry store.** Closing a resumed run's dead trace
+  segments listed every trace of the run through `list_traces`, which walks every trace in the
+  store; about 5% of a 30-user profile, growing with the store. It now reads only the segments
+  the run's record names. The result is the same.
+- **OmniServe resumes the interactive runs a dead process left behind.** Until
+  now a run whose process died (a killed container, a lost store connection)
+  stayed `running` with a lapsed lease until someone called `resume(run_id)`.
+  The server now sweeps for them on start and every 30 seconds (each wait
+  varies by up to a quarter, so replicas do not sweep together), claims a run
+  through its record's own version check (two replicas never take one run),
+  and resumes it under the durable rules: a call that did not finish becomes
+  `unknown_outcome` unless its tool is idempotent. Runs waiting for a person
+  and background runs are left alone; a run recovered three times and still
+  not finished is ended `failed`. The trace says why (`run_resumed`, see
+  above). To keep the earlier behaviour, set
+  `OMNICOREAGENT_SERVE_ORPHAN_SWEEP_ENABLED=false`. Without OmniServe,
+  `agent.claim_orphaned_runs()` and `agent.resume_claimed(claim)` do the same.
+- **A server's memory no longer climbs with every visit from the C allocator.** In the 30-minute
+  soak the desk's memory rose 2.6 to 2.8 MiB a minute with no plateau. Most of it was glibc: each
+  thread that allocates gets an arena (up to eight a core), and OmniServe runs many (the database
+  calls, the telemetry writer, tool calls), so freed memory stayed in arenas. OmniServe now asks
+  for at most two arenas when it is built. `MALLOC_ARENA_MAX`, if you set it, wins, and
+  `OMNICOREAGENT_SERVE_MALLOC_ARENAS` changes the number (`0` leaves the allocator alone). It does
+  nothing off glibc.
+
+- **A session's state is released when its run ends.** The agent kept a `SessionState` for every
+  session that ever ran, with the last run's messages and its loop detector, for the life of the
+  process. In a 30-minute server soak of the support desk (20 users, 2,233 visits) memory rose
+  2.6 to 2.8 MiB a minute with no plateau. Locally the same flow left about 48 more allocated
+  blocks per visit (81 against 33). The store now drops the session when the run leaves, on every
+  exit: completed, failed, cancelled, suspended.
+
 ## 0.5.1
 
 *October 2026 · Python 3.12+*

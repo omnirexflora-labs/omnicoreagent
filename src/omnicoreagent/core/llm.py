@@ -8,10 +8,13 @@ import re
 import time
 import warnings
 from collections.abc import Callable
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from contextvars import ContextVar
 from typing import Any
 
 from omnicoreagent.core.logging import logger
+from omnicoreagent.core.runtime.deadline import time_remaining
 
 warnings.filterwarnings(
     "ignore", message="Pydantic serializer warnings", module="pydantic.main"
@@ -211,6 +214,8 @@ def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor
                         max_delay,
                         backoff_factor,
                     )
+                    if _outlasts_deadline(delay):
+                        break
                     _notify_retry(attempt + 1, e, delay)
                     await asyncio.sleep(delay)
             raise last_exception
@@ -230,9 +235,12 @@ def retry_with_backoff(max_retries=3, base_delay=1, max_delay=60, backoff_factor
                             f"Max retries ({max_retries}) exceeded. Last error: {e}"
                         )
                         break
-                    _sleep_before_retry(
+                    delay = _retry_delay(
                         e, attempt, max_retries, base_delay, max_delay, backoff_factor
                     )
+                    if _outlasts_deadline(delay):
+                        break
+                    time.sleep(delay)
             raise last_exception
 
         return async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
@@ -277,9 +285,52 @@ def model_error(exc: BaseException) -> str | None:
     )
 
 
+# What a provider answers when it is busy or broken for a moment, not wrong
+# about the request: asked too fast (429), a server fault (500, 502, 503,
+# 504), overloaded (529, Anthropic's), and a request that timed out (408).
+# The support desk chaos run (2026-10-07) failed twelve runs on twelve 500s
+# because only an error whose text said "rate limit" or "timeout" was retried.
+_TRANSIENT_STATUSES = frozenset({408, 429, 500, 502, 503, 504, 529})
+
+# Errors that carry no status (a dropped connection, a read timeout), by the
+# class name LiteLLM and the OpenAI client give them.
+_TRANSIENT_ERROR_CLASSES = frozenset(
+    {
+        "RateLimitError",
+        "InternalServerError",
+        "ServiceUnavailableError",
+        "BadGatewayError",
+        "APIConnectionError",
+        "APITimeoutError",
+        "Timeout",
+        "ReadTimeout",
+        "ConnectTimeout",
+        "ConnectError",
+        "RemoteProtocolError",
+    }
+)
+
+# The longest a provider's Retry-After is obeyed. A provider asking for more
+# than this is not going to recover inside a run; the call is retried at the
+# cap and fails if the provider still says no.
+MAX_RETRY_AFTER_SECONDS = 60.0
+
+
+def _status_of(exc: BaseException) -> int | None:
+    status = getattr(exc, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
 def _is_retryable(exc: Exception) -> bool:
     if account_error(exc) is not None or model_error(exc) is not None:
         return False
+    status = _status_of(exc)
+    if status is not None:
+        # A status is the provider's own word. A 400 whose text happens to
+        # contain "timeout" (an invalid timeout parameter) is not transient.
+        return status in _TRANSIENT_STATUSES
+    if type(exc).__name__ in _TRANSIENT_ERROR_CLASSES:
+        return True
     error_msg = str(exc).lower()
     return any(
         keyword in error_msg
@@ -299,6 +350,53 @@ def _is_retryable(exc: Exception) -> bool:
     )
 
 
+def _response_headers(exc: BaseException) -> dict[str, str]:
+    """The provider's response headers on an error, lower-cased.
+
+    LiteLLM keeps them on ``litellm_response_headers``; the response object it
+    attaches to a status error is a stub with none (checked against the fake
+    provider, 2026-10-07), so that is read only as a fallback.
+    """
+    for holder in (exc, getattr(exc, "response", None)):
+        headers = getattr(holder, "litellm_response_headers", None) or getattr(
+            holder, "headers", None
+        )
+        if headers:
+            try:
+                return {str(k).lower(): str(v) for k, v in dict(headers).items()}
+            except (TypeError, ValueError):
+                continue
+    return {}
+
+
+def _retry_after(exc: BaseException) -> float | None:
+    """Seconds the provider asked the caller to wait, or None when it did not.
+
+    Reads ``retry-after-ms``, then ``retry-after`` as seconds or an HTTP date.
+    """
+    headers = _response_headers(exc)
+    milliseconds = headers.get("retry-after-ms")
+    if milliseconds is not None:
+        try:
+            return max(0.0, float(milliseconds) / 1000)
+        except ValueError:
+            pass
+    value = headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
+
 def _retry_delay(
     exc: Exception,
     attempt: int,
@@ -308,15 +406,35 @@ def _retry_delay(
     backoff_factor: int,
 ) -> float:
     delay = min(base_delay * (backoff_factor**attempt), max_delay)
-    jitter = random.uniform(0, 0.1 * delay)
+    asked = _retry_after(exc)
+    if asked is not None:
+        # The provider's own number is a floor: the chaos run (2026-10-07)
+        # saw a 3 second Retry-After retried after 1.1 seconds, and 23 of
+        # 26 retries came back too early.
+        delay = max(delay, min(asked, MAX_RETRY_AFTER_SECONDS))
+    # Jitter only adds, so the wait is never shorter than Retry-After, and
+    # many callers told to wait the same time do not return together.
+    jitter = random.uniform(0, 0.25 * delay)
     total_delay = delay + jitter
     logger.warning(f"Retryable error on attempt {attempt + 1}/{max_retries + 1}: {exc}")
     logger.info(f"Retrying in {total_delay:.2f} seconds...")
     return total_delay
 
 
-def _sleep_before_retry(*args):
-    time.sleep(_retry_delay(*args))
+def _outlasts_deadline(delay: float) -> bool:
+    """Whether waiting ``delay`` would run past the run's deadline.
+
+    Then the retry is not worth starting: the run fails now with the
+    provider's error rather than being cancelled mid-sleep as a timeout.
+    """
+    remaining = time_remaining()
+    if remaining is None or delay < remaining:
+        return False
+    logger.warning(
+        f"Not retrying: waiting {delay:.1f}s would pass the run's deadline "
+        f"({remaining:.1f}s left)"
+    )
+    return True
 
 
 # Continuation data each provider's LiteLLM path reads back from the assistant

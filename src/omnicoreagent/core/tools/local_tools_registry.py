@@ -1,8 +1,11 @@
 import asyncio
+import functools
 import inspect
 from collections.abc import Callable
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 from types import UnionType
+
+from omnicoreagent.core.tools.call_start import current_start_box
 
 
 # Built-in tool families governance classifies by their own capabilities.
@@ -47,7 +50,18 @@ class Tool:
         bound.apply_defaults()
         if self.is_async:
             return await self.function(*bound.args, **bound.kwargs)
-        return await asyncio.to_thread(self.function, *bound.args, **bound.kwargs)
+        # The thread reports into this call's box when the function really
+        # starts, so a call that times out can be told apart: still queued
+        # (nothing happened) or running (its effect may land later).
+        box = current_start_box()
+
+        @functools.wraps(self.function)
+        def in_thread(*args, **kwargs):
+            if box is not None:
+                box["began"] = True
+            return self.function(*args, **kwargs)
+
+        return await asyncio.to_thread(in_thread, *bound.args, **bound.kwargs)
 
     def __repr__(self):
         return f"<Tool name={self.name} async={self.is_async}>"

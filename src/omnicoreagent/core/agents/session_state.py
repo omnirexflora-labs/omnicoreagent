@@ -50,3 +50,25 @@ class AgentSessionStateStore:
             raise
         finally:
             session_state.state = previous_state
+            if previous_state in (AgentState.IDLE, AgentState.ERROR):
+                self._release(session_id, session_state)
+
+    def _release(self, session_id: str, session_state: SessionState) -> None:
+        """Forget a session whose run has ended, on every way a run can end.
+
+        Nothing in the state outlives a run: ``reset_for_run`` empties it
+        before the next one. But the store kept one per session for the life
+        of the process, with the last run's messages and its loop detector.
+        In the 30-minute server soak (2026-10-07) that was about 37 KB a visit
+        with no plateau, and the first thing to grow in the support desk's
+        heap. A run that ends by completing, failing, being cancelled or
+        suspending all leave through this ``finally``.
+        """
+        key = (session_id, self.agent_name)
+        if self.states.get(key) is session_state:
+            del self.states[key]
+        session_state.messages = []
+        session_state.assistant_with_tool_calls = None
+        session_state.pending_tool_responses = []
+        session_state.observation_event_ids = {}
+        session_state.delivered_observation_event_ids = set()

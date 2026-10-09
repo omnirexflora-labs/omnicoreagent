@@ -42,7 +42,7 @@ async def test_the_model_is_told_a_timed_out_call_may_still_take_effect(tmp_path
 
     told = next(m for m in model.calls[-1] if m.get("tool_call_id") == "c1")
     message = json.loads(told["content"])["message"]
-    assert "may still take effect" in message and "Check before calling it again" in message, message
+    assert "may still take effect" in message and "outcome is unknown" in message and "Check what it did" in message, message
     time.sleep(3)
     assert ledger.read_text() == "charged 10", "the call did finish, after the limit"
     await agent.cleanup()

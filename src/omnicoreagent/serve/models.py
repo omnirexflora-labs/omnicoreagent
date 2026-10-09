@@ -5,7 +5,7 @@ Pydantic models for API request/response schemas.
 """
 
 from typing import Literal, Any, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from omnicoreagent.background import (
     BackgroundAgentSpec,
@@ -123,6 +123,14 @@ class RunResponse(BaseModel):
     budget_request: Optional[dict[str, Any]] = Field(
         None, description="The budget a waiting run ran out of, and what it needs"
     )
+    side_effects: Optional[list[dict[str, Any]]] = Field(
+        None,
+        description=(
+            "When the run ended in error: the calls it already made that may have "
+            "changed something (tool name, call id, outcome success or unknown). "
+            "Resume the run; a new run can repeat them."
+        ),
+    )
     session_id: str = Field(..., description="Session ID for this conversation")
     agent_name: str = Field(..., description="Name of the agent")
     metric: Optional[dict[str, Any]] = Field(
@@ -130,6 +138,15 @@ class RunResponse(BaseModel):
     )
     trace_id: Optional[str] = Field(None, description="Telemetry trace ID for this run")
     run_id: Optional[str] = Field(None, description="Runtime run ID for this run")
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_side_effects(self, handler):
+        # Most runs have none; the key appears only when there is something
+        # to say, so existing clients see the same shape as before.
+        data = handler(self)
+        if data.get("side_effects") is None:
+            data.pop("side_effects", None)
+        return data
 
 
 class ApprovalDecisionRequest(BaseModel):

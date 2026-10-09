@@ -1,6 +1,6 @@
 """Durable background execution routes for OmniServe."""
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from omnicoreagent.background import (
     AgentAlreadyRegisteredError,
@@ -15,6 +15,7 @@ from omnicoreagent.background import (
 )
 from omnicoreagent.background.models import SETTLED_RUN_STATUSES
 
+from ..admission import run_slot
 from ..models import (
     BackgroundAgentRegistrationRequest,
     BackgroundAgentsResponse,
@@ -233,6 +234,7 @@ def create_background_router() -> APIRouter:
                 "description": "Run did not finish before request timeout",
             },
         },
+        dependencies=[Depends(run_slot)],
     )
     async def run_background_task(
         request: Request, task_id: str, body: BackgroundTaskRunRequest | None = None

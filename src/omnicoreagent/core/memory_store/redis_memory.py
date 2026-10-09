@@ -5,6 +5,10 @@ import redis.asyncio as redis
 import threading
 import asyncio
 
+from omnicoreagent.core.budgets import (
+    counters_view,
+    legacy_budget_parts,
+)
 from omnicoreagent.core.memory_store.base import AbstractMemoryStore
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.summarizer.summarizer_engine import (
@@ -34,15 +38,21 @@ class RedisConnectionManager:
         with self._lock:
             if self._client is None:
                 try:
-                    self._client = redis.from_url(
+                    # A blocking pool: past 20 connections a caller waits its
+                    # turn. The plain pool raised MaxConnectionsError instead,
+                    # and 200 runs charging one budget at once (each a tiny
+                    # script) failed 180 of them on it.
+                    pool = redis.BlockingConnectionPool.from_url(
                         self.redis_url,
                         decode_responses=True,
                         max_connections=20,
+                        timeout=30,
                         retry_on_timeout=True,
                         socket_timeout=5,
                         socket_connect_timeout=5,
                         health_check_interval=30,
                     )
+                    self._client = redis.Redis.from_pool(pool)
                     logger.debug(
                         "[RedisManager] Created Redis connection pool"
                     )
@@ -90,6 +100,8 @@ class RedisMemoryStore(AbstractMemoryStore):
         Args:
             redis_url: Redis connection URL. If None, Redis will not be initialized.
         """
+        # Counters left in the 0.5.x shape are looked for once per key.
+        self._legacy_budgets_moved: set[str] = set()
         if redis_url is None:
             logger.debug("RedisMemoryStore skipped - redis_url not provided")
             self._connection_manager = None
@@ -180,7 +192,10 @@ class RedisMemoryStore(AbstractMemoryStore):
             logger.debug(f"Stored message for session {session_id}")
 
         except Exception as e:
+            # Raised, not swallowed: a message that was never stored must not
+            # look stored (found merging the P6 tracks, 2026-10-07).
             logger.error(f"Failed to store message: {e}")
+            raise
         finally:
             if self._connection_manager and client:
                 self._connection_manager.release_client()
@@ -573,9 +588,221 @@ class RedisMemoryStore(AbstractMemoryStore):
         return removed
 
     # --- budgets -----------------------------------------------------------
-    # One hash per budget (version, data); saves are compare-and-swap in Lua,
-    # so concurrent workers cannot both spend the last of a budget.
+    # Per budget key: a hash of ``<meter>:spent|reserved|granted`` counters, a
+    # hash of holds (one JSON record each), and a list of grants. A change is
+    # one Lua script, which Redis runs without interleaving anything else: the
+    # limit check and the increments are one step, so a crowd of runs on one
+    # key neither passes the limit nor conflicts with itself (the support desk
+    # ramp, 2026-10-07). The three keys share a hash tag so a cluster keeps
+    # them on one node.
 
+    _APPLY_BUDGET = """
+    local meters, holds, grants = KEYS[1], KEYS[2], KEYS[3]
+    local c = cjson.decode(ARGV[1])
+    local null = cjson.null
+    local function num(v) return tonumber(v) or 0 end
+    local function get(m, f) return num(redis.call('HGET', meters, m .. ':' .. f)) end
+    local function incr(m, f, v)
+        if v ~= 0 then redis.call('HINCRBYFLOAT', meters, m .. ':' .. f, string.format('%.17g', v)) end
+    end
+    local function exact(v) return string.format('%.17g', v) end
+
+    local checks = {}
+    if c.hold and c.hold ~= null and c.hold.amount and c.hold.amount ~= 0 then
+        table.insert(checks, {c.hold.meter, c.hold.amount, c.hold.limit})
+    end
+    for _, g in ipairs(c.guard or {}) do table.insert(checks, {g[1], g[2], g[3]}) end
+    for _, chk in ipairs(checks) do
+        local limit = chk[3]
+        if limit ~= nil and limit ~= null then
+            local used, held, granted = get(chk[1], 'spent'), get(chk[1], 'reserved'), get(chk[1], 'granted')
+            if used + held + chk[2] > limit + granted then
+                if held < 0 then held = 0 end
+                return {'refused', chk[1], exact(limit + granted), exact(used), exact(held), exact(chk[2])}
+            end
+        end
+    end
+
+    local touched, order = {}, {}
+    local function touch(m) if not touched[m] then touched[m] = true; table.insert(order, m) end end
+    local released = 0
+    local function drop(id)
+        local raw = redis.call('HGET', holds, id)
+        if not raw then return false end
+        local h = cjson.decode(raw)
+        redis.call('HDEL', holds, id)
+        incr(h.meter, 'reserved', -h.amount)
+        return true
+    end
+
+    local s = c.settle
+    if s and s ~= null then
+        local removed = drop(s.id)
+        if s.spend ~= nil and s.spend ~= null and (removed or s.even_if_released) then
+            incr(s.meter, 'spent', s.spend)
+            touch(s.meter)
+        end
+    end
+    if c.release_runs and #c.release_runs > 0 then
+        local wanted = {}
+        for _, r in ipairs(c.release_runs) do wanted[r] = true end
+        local flat = redis.call('HGETALL', holds)
+        for i = 1, #flat, 2 do
+            local h = cjson.decode(flat[i + 1])
+            if h.run_id ~= nil and h.run_id ~= null and wanted[h.run_id] then
+                if drop(flat[i]) then released = released + 1 end
+            end
+        end
+    end
+    if c.hold and c.hold ~= null and c.hold.amount and c.hold.amount ~= 0 then
+        redis.call('HSET', holds, c.hold.id, ARGV[2])
+        incr(c.hold.meter, 'reserved', c.hold.amount)
+    end
+    for _, g in ipairs(c.guard or {}) do incr(g[1], 'spent', g[2]); touch(g[1]) end
+    for _, a in ipairs(c.add or {}) do incr(a[1], 'spent', a[2]); touch(a[1]) end
+    if c.grant and c.grant ~= null then
+        incr(c.grant.meter, 'granted', c.grant.amount)
+        redis.call('RPUSH', grants, ARGV[3])
+        redis.call('LTRIM', grants, -20, -1)
+    end
+    local out = {'ok', tostring(released)}
+    for _, m in ipairs(order) do
+        table.insert(out, m)
+        table.insert(out, redis.call('HGET', meters, m .. ':spent') or '0')
+    end
+    return out
+    """
+
+    # Moves a 0.5.x counter (one JSON document under ``omnicoreagent_budget:``)
+    # into the keys above, only if the document is still what was read, and
+    # removes it in the same step so two workers cannot both add it.
+    _MOVE_LEGACY_BUDGET = """
+    if redis.call('HGET', KEYS[1], 'data') ~= ARGV[1] then return 0 end
+    redis.call('DEL', KEYS[1])
+    local parts = cjson.decode(ARGV[2])
+    for field, amount in pairs(parts.counters) do
+        if amount ~= 0 then
+            redis.call('HINCRBYFLOAT', KEYS[2], field, string.format('%.17g', amount))
+        end
+    end
+    for id, raw in pairs(parts.holds) do redis.call('HSET', KEYS[3], id, raw) end
+    for _, raw in ipairs(parts.history) do redis.call('RPUSH', KEYS[4], raw) end
+    redis.call('LTRIM', KEYS[4], -20, -1)
+    return 1
+    """
+
+    @staticmethod
+    def _budget_keys(key: str) -> tuple[str, str, str]:
+        tag = f"omnicoreagent_budget2:{{{key}}}"
+        return f"{tag}:meters", f"{tag}:holds", f"{tag}:grants"
+
+    async def _move_legacy_budget(self, key: str) -> None:
+        if key in self._legacy_budgets_moved:
+            return
+        client = await self._get_client()
+        legacy = f"omnicoreagent_budget:{key}"
+        for _ in range(5):
+            data = await client.hget(legacy, "data")
+            if not data:
+                break
+            parts = legacy_budget_parts(json.loads(data))
+            meters, holds, grants = self._budget_keys(key)
+            counters = {
+                f"{meter}:{name}": amount
+                for meter, values in parts["counters"].items()
+                for name, amount in values.items()
+            }
+            moved = await client.eval(
+                self._MOVE_LEGACY_BUDGET,
+                4,
+                legacy,
+                meters,
+                holds,
+                grants,
+                data,
+                json.dumps(
+                    {
+                        "counters": counters,
+                        "holds": {i: json.dumps(h) for i, h in parts["holds"].items()},
+                        "history": [json.dumps(e, default=str) for e in parts["history"]],
+                    }
+                ),
+            )
+            if moved:
+                break
+        if len(self._legacy_budgets_moved) > 10_000:
+            self._legacy_budgets_moved.clear()
+        self._legacy_budgets_moved.add(key)
+
+    async def delete_budget_state(self, key: str) -> None:
+        client = await self._get_client()
+        await client.delete(f"omnicoreagent_budget:{key}", *self._budget_keys(key))
+
+    async def get_budget_state(self, key: str) -> dict | None:
+        await self._move_legacy_budget(key)
+        client = await self._get_client()
+        fields = await client.hgetall(self._budget_keys(key)[0])
+        counters: dict[str, dict[str, float]] = {}
+        for field, value in fields.items():
+            field = field.decode() if isinstance(field, bytes) else field
+            meter, _, name = field.rpartition(":")
+            counters.setdefault(meter, {"spent": 0.0, "reserved": 0.0, "granted": 0.0})[name] = float(
+                value
+            )
+        return counters_view(key, counters)
+
+    async def get_budget_grant_history(self, key: str) -> list[dict]:
+        await self._move_legacy_budget(key)
+        client = await self._get_client()
+        return [json.loads(raw) for raw in await client.lrange(self._budget_keys(key)[2], 0, -1)]
+
+    async def list_budget_holds(self, key: str) -> list[dict]:
+        await self._move_legacy_budget(key)
+        client = await self._get_client()
+        held = await client.hgetall(self._budget_keys(key)[1])
+        return [
+            {"id": i.decode() if isinstance(i, bytes) else i, **json.loads(raw)}
+            for i, raw in held.items()
+        ]
+
+    async def apply_budget_change(self, key: str, change: dict) -> dict:
+        await self._move_legacy_budget(key)
+        client = await self._get_client()
+        hold = change.get("hold")
+        grant = change.get("grant")
+        answer = await client.eval(
+            self._APPLY_BUDGET,
+            3,
+            *self._budget_keys(key),
+            json.dumps(change, default=str),
+            # Stored as Python wrote them, so no digit is lost in the script.
+            json.dumps(
+                {k: hold[k] for k in ("meter", "amount", "run_id", "held_at")}, default=str
+            )
+            if hold
+            else "",
+            json.dumps(grant, default=str) if grant else "",
+        )
+        answer = [a.decode() if isinstance(a, bytes) else a for a in answer]
+        if answer[0] == "refused":
+            _, meter, limit, used, held, requested = answer
+            return {
+                "refused": {
+                    "meter": meter,
+                    "limit": float(limit),
+                    "used": float(used),
+                    "reserved": float(held),
+                    "requested": float(requested),
+                },
+                "totals": {},
+                "released": 0,
+            }
+        totals = {answer[i]: float(answer[i + 1]) for i in range(2, len(answer), 2)}
+        return {"refused": None, "totals": totals, "released": int(answer[1])}
+
+    # The 0.5.x counter was one hash per budget (version, data); saves were a
+    # compare-and-swap in Lua. Nothing in the runtime writes it any more: this
+    # is how a counter in that shape is planted, to be moved on first touch.
     _SAVE_BUDGET = """
     local current = redis.call('HGET', KEYS[1], 'version')
     if ARGV[1] == '' then
@@ -586,15 +813,6 @@ class RedisMemoryStore(AbstractMemoryStore):
     redis.call('HSET', KEYS[1], 'version', ARGV[2], 'data', ARGV[3])
     return 1
     """
-
-    async def delete_budget_state(self, key: str) -> None:
-        client = await self._get_client()
-        await client.delete(f"omnicoreagent_budget:{key}")
-
-    async def get_budget_state(self, key: str) -> dict | None:
-        client = await self._get_client()
-        data = await client.hget(f"omnicoreagent_budget:{key}", "data")
-        return json.loads(data) if data else None
 
     async def save_budget_state(self, state: dict, expected_version: int | None) -> int:
         from omnicoreagent.core.runs import RunStateConflict

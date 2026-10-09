@@ -25,6 +25,8 @@ Environment Variables (OVERRIDE code values):
     OMNICOREAGENT_SERVE_RATE_LIMIT_ENABLED: Enable rate limiting (default: false)
     OMNICOREAGENT_SERVE_RATE_LIMIT_REQUESTS: Max requests per window (default: 100)
     OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW: Time window in seconds (default: 60)
+    OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS: Concurrent runs one process takes; 0 or none is unlimited (default: 24)
+    OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT: Seconds a request waits for a run slot before a 503 (default: 5)
     OMNICOREAGENT_SERVE_TRUSTED_PROXIES: Comma-separated proxy addresses whose X-Forwarded-For is trusted (default: none)
     OMNICOREAGENT_BACKGROUND_ENABLED: Enable background APIs (default: true)
     OMNICOREAGENT_BACKGROUND_AGENT_ID: Agent id used for the served agent (default: default)
@@ -196,6 +198,18 @@ class OmniServeConfig(BaseModel):
         description="Proxy addresses whose X-Forwarded-For is trusted",
     )
 
+    # Admission: how many runs one process takes at once. None means the
+    # default, 24, the knee measured on a server; 0 means unlimited. A request over
+    # the limit waits this long for a slot, then gets 503 with Retry-After
+    # (the support desk ramp, 2026-10-07).
+    max_concurrent_runs: int | None = Field(
+        default=None,
+        description="Concurrent runs per process; None uses the default of 24, 0 is unlimited",
+    )
+    run_admission_wait_seconds: float = Field(
+        default=5.0, description="Seconds a request waits for a run slot before a 503"
+    )
+
     # Background execution
     background_enabled: bool = Field(
         default=True, description="Expose background execution endpoints"
@@ -227,6 +241,32 @@ class OmniServeConfig(BaseModel):
     background_start_worker: bool = Field(
         default=True,
         description="Start the background scheduler/worker during OmniServe lifespan",
+    )
+
+    # Orphaned runs. A run whose process died stays `running` with a lapsed
+    # lease; with the sweep on (the default) the server resumes such runs of
+    # its agent by itself, instead of waiting for someone to call `resume`.
+    orphan_sweep_enabled: bool = Field(
+        default=True,
+        description="Resume this agent's runs whose process died (lapsed lease)",
+    )
+    orphan_sweep_interval_seconds: float = Field(
+        default=30.0,
+        description="Seconds between sweeps for orphaned runs (each wait varies by up to 25%)",
+    )
+    orphan_sweep_decided_grace_seconds: float = Field(
+        default=30.0,
+        description=(
+            "Seconds a run waits after its approval or budget decision before the sweep "
+            "resumes it for a client that never did"
+        ),
+    )
+    orphan_sweep_max_concurrent: int = Field(
+        default=2, description="Recovered runs this server resumes at once"
+    )
+    orphan_sweep_max_recoveries: int = Field(
+        default=3,
+        description="Recoveries of one run before it is ended failed instead",
     )
 
     @model_validator(mode="after")
@@ -293,6 +333,21 @@ class OmniServeConfig(BaseModel):
         if (val := _get_env_list(serve_prefix, "TRUSTED_PROXIES")) is not None:
             self.trusted_proxies = val
 
+        # Admission
+        if (val := _get_env(serve_prefix, "MAX_CONCURRENT_RUNS")) is not None:
+            if val.strip().lower() in {"none", "unlimited"}:
+                self.max_concurrent_runs = 0
+            else:
+                try:
+                    self.max_concurrent_runs = int(val)
+                except ValueError:
+                    raise ValueError(
+                        "OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS must be an "
+                        "integer, 0 or none"
+                    ) from None
+        if (val := _get_env_float(serve_prefix, "RUN_ADMISSION_WAIT")) is not None:
+            self.run_admission_wait_seconds = val
+
         # Background execution
         if (val := _get_env_bool(background_prefix, "ENABLED")) is not None:
             self.background_enabled = val
@@ -315,12 +370,26 @@ class OmniServeConfig(BaseModel):
         if (val := _get_env_bool(background_prefix, "START_WORKER")) is not None:
             self.background_start_worker = val
 
+        # Orphaned runs
+        if (val := _get_env_bool(serve_prefix, "ORPHAN_SWEEP_ENABLED")) is not None:
+            self.orphan_sweep_enabled = val
+        if (val := _get_env_float(serve_prefix, "ORPHAN_SWEEP_INTERVAL_SECONDS")) is not None:
+            self.orphan_sweep_interval_seconds = val
+        if (val := _get_env_float(serve_prefix, "ORPHAN_SWEEP_DECIDED_GRACE_SECONDS")) is not None:
+            self.orphan_sweep_decided_grace_seconds = val
+        if (val := _get_env_int(serve_prefix, "ORPHAN_SWEEP_MAX_CONCURRENT")) is not None:
+            self.orphan_sweep_max_concurrent = val
+        if (val := _get_env_int(serve_prefix, "ORPHAN_SWEEP_MAX_RECOVERIES")) is not None:
+            self.orphan_sweep_max_recoveries = val
+
         self.api_prefix = normalize_api_prefix(self.api_prefix)
         self.log_level = self.log_level.upper()
         self._validate_server_config()
         self._validate_log_level()
         self._validate_auth_config()
         self._validate_rate_limit_config()
+        self._validate_admission_config()
+        self._validate_orphan_sweep_config()
         return self
 
     def _validate_server_config(self) -> None:
@@ -344,6 +413,27 @@ class OmniServeConfig(BaseModel):
                 "OMNICOREAGENT_SERVE_AUTH_ENABLED=true"
             )
 
+    def _validate_orphan_sweep_config(self) -> None:
+        if not self.orphan_sweep_enabled:
+            return
+        if self.orphan_sweep_interval_seconds <= 0:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_ORPHAN_SWEEP_INTERVAL_SECONDS must be greater "
+                "than 0 when the orphan sweep is enabled"
+            )
+        if self.orphan_sweep_decided_grace_seconds < 0:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_ORPHAN_SWEEP_DECIDED_GRACE_SECONDS must be 0 or more"
+            )
+        if self.orphan_sweep_max_concurrent < 1:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_CONCURRENT must be at least 1"
+            )
+        if self.orphan_sweep_max_recoveries < 1:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_ORPHAN_SWEEP_MAX_RECOVERIES must be at least 1"
+            )
+
     def _validate_rate_limit_config(self) -> None:
         if not self.rate_limit_enabled:
             return
@@ -356,6 +446,17 @@ class OmniServeConfig(BaseModel):
             raise ValueError(
                 "OMNICOREAGENT_SERVE_RATE_LIMIT_WINDOW must be at least 1 "
                 "when rate limiting is enabled"
+            )
+
+    def _validate_admission_config(self) -> None:
+        if self.max_concurrent_runs is not None and self.max_concurrent_runs < 0:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_MAX_CONCURRENT_RUNS must be 0 (unlimited) "
+                "or a positive number"
+            )
+        if self.run_admission_wait_seconds < 0:
+            raise ValueError(
+                "OMNICOREAGENT_SERVE_RUN_ADMISSION_WAIT must not be negative"
             )
 
     @classmethod

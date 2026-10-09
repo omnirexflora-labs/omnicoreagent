@@ -1,0 +1,117 @@
+# The support desk: OmniServe + Postgres + Redis + a fake model provider.
+#
+#   docker compose -p support-desk -f apps/support_desk/compose.yml up -d --build
+#
+# With no LLM_API_KEY the desk talks to the fake provider and costs nothing. For
+# a real model, export the key and the model name first:
+#   LLM_API_KEY=... DESK_MODEL=gpt-5.4-mini docker compose -p support-desk -f apps/support_desk/compose.yml up -d
+#
+# Everything binds to loopback. The env file (env.example is a template with no
+# secrets; copy it, edit it, and name it with DESK_ENV_FILE) sets the API token.
+
+name: support-desk
+
+services:
+  desk:
+    build:
+      context: ../..
+      dockerfile: apps/support_desk/Dockerfile
+    ports:
+      - "127.0.0.1:${DESK_PORT:-8800}:8000"
+    env_file:
+      - ${DESK_ENV_FILE:-env.example}
+    environment:
+      # The real model, when these are set in the shell. Left unset, the desk
+      # uses the fake provider below.
+      - LLM_API_KEY
+      - DESK_MODEL
+      - DESK_BASE_URL
+      - DESK_FAKE_URL=http://fakeprovider:9000/v1
+      - DESK_DB=/app/data/desk.db
+      # The load and chaos profile and the test hooks (see load/README.md).
+      # Unset in the shell, they are off.
+      - DESK_PROFILE
+      - DESK_DEBUG
+      - DESK_TOOL_DELAY
+      - DESK_TOOL_TIMEOUT
+      - DESK_LEASE_SECONDS
+      - DESK_OTLP_ENDPOINT
+      # memory, run state and budgets
+      - DATABASE_URL=postgresql+psycopg2://desk:desk@postgres:5432/desk
+      # background tasks and their leases
+      - OMNICOREAGENT_BACKGROUND_ENABLED=true
+      - OMNICOREAGENT_BACKGROUND_AGENT_ID=support-desk
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE=redis
+      - OMNICOREAGENT_BACKGROUND_TASK_STORE_URL=redis://redis:6379/0
+      - OMNICOREAGENT_BACKGROUND_START_WORKER=true
+      # traces on a volume
+      - OMNICOREAGENT_WORKSPACE_BACKEND=local
+      - OMNICOREAGENT_WORKSPACE_DIR=/app/workspace
+      # the API: a token is required
+      - OMNICOREAGENT_SERVE_AUTH_ENABLED=true
+      - OMNICOREAGENT_SERVE_REQUEST_TIMEOUT=120
+      - OMNICOREAGENT_SERVE_LOG_LEVEL=INFO
+    # The server caps from the production readiness plan: a small, fair
+    # production instance, and a neighbour that is not starved.
+    cpus: 2
+    mem_limit: 4g
+    volumes:
+      - desk-workspace:/app/workspace
+      - desk-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fakeprovider:
+        condition: service_healthy
+    restart: unless-stopped
+
+  fakeprovider:
+    build:
+      context: ../..
+      dockerfile: apps/support_desk/fakeprovider/Dockerfile
+    env_file:
+      - ${DESK_ENV_FILE:-env.example}
+    # Reached by the desk on the Compose network; published on loopback so a
+    # load script can change its faults (POST /_control) and read /_stats.
+    ports:
+      - "127.0.0.1:${DESK_FAKE_PORT:-9000}:9000"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=desk
+      - POSTGRES_PASSWORD=desk
+      - POSTGRES_DB=desk
+    ports:
+      - "127.0.0.1:${DESK_POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - desk-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U desk -d desk"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${DESK_REDIS_PORT:-6381}:6379"
+    volumes:
+      - desk-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  desk-workspace:
+  desk-data:
+  desk-postgres:
+  desk-redis:

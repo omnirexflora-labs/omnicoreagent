@@ -3,8 +3,9 @@
 import asyncio
 from uuid import uuid4
 
-from fastapi import Query, APIRouter, HTTPException, Request
+from fastapi import Depends, Query, APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from omnicoreagent.core.logging import logger
 from omnicoreagent.core.runtime.deadline import (
@@ -12,7 +13,9 @@ from omnicoreagent.core.runtime.deadline import (
     run_with_timeout,
 )
 from omnicoreagent.core.telemetry import TraceStatus
+from omnicoreagent.core.runs import RunStateConflict
 
+from ..admission import admit, run_slot
 from ..models import (
     ApprovalDecisionRequest,
     BudgetDecisionRequest,
@@ -23,7 +26,7 @@ from ..models import (
     SteerRequest,
 )
 from ..serialization import normalize_run_result
-from ..sse import _public_error, run_agent_stream
+from ..sse import _public_error, run_agent_stream, run_side_effects
 from ..state import get_agent, get_agent_name, get_config, resolve_session_id
 from ..telemetry import build_run_kwargs, finish_serve_trace, start_serve_trace
 
@@ -60,14 +63,22 @@ def create_runs_router() -> APIRouter:
             f"query_length={len(body.query)}"
         )
 
+        # Before streaming starts, so a busy server can still answer 503.
+        slot = await admit(request)
         return StreamingResponse(
-            run_agent_stream(
-                agent,
-                body.query,
-                session_id,
-                timeout_seconds=config.request_timeout,
-                is_disconnected=request.is_disconnected,
+            # The slot is held while the stream is sent. The background
+            # release covers a client that left before the first byte, when
+            # the generator never starts and its own cleanup never runs.
+            slot.around(
+                run_agent_stream(
+                    agent,
+                    body.query,
+                    session_id,
+                    timeout_seconds=config.request_timeout,
+                    is_disconnected=request.is_disconnected,
+                )
             ),
+            background=BackgroundTask(slot.release),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -81,7 +92,8 @@ def create_runs_router() -> APIRouter:
         response_model=RunResponse,
         summary="Run agent (synchronous)",
         description="Run the agent with a query and return a JSON response.",
-        responses={500: {"model": ErrorResponse}},
+        responses={500: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        dependencies=[Depends(run_slot)],
     )
     async def run_agent_sync(request: Request, body: RunRequest) -> RunResponse:
         agent = get_agent(request)
@@ -117,6 +129,8 @@ def create_runs_router() -> APIRouter:
                 privacy_filter=getattr(agent, "privacy_filter", None),
             )
             normalized["run_id"] = normalized.get("run_id") or run_id
+            if normalized.get("status") == "error":
+                normalized["side_effects"] = await run_side_effects(agent, normalized["run_id"])
             # The request trace reports the agent's real outcome.
             await finish_serve_trace(
                 serve_trace,
@@ -146,7 +160,10 @@ def create_runs_router() -> APIRouter:
                 status=TraceStatus.TIMEOUT,
                 error={"type": "TimeoutError", "message": "Request timed out"},
             )
-            # The run keeps its record: name it, so the caller can look it up.
+            # The run keeps its record: name it, so the caller can look it up,
+            # and say what it already did, so a client does not start a new
+            # run that repeats it: resume this one.
+            found = await run_side_effects(agent, run_id)
             raise HTTPException(
                 status_code=504,
                 detail={
@@ -154,6 +171,7 @@ def create_runs_router() -> APIRouter:
                     "run_id": run_id,
                     "session_id": session_id,
                     "request_timeout_seconds": config.request_timeout,
+                    **({"side_effects": found} if found else {}),
                 },
             )
         except Exception as exc:
@@ -234,7 +252,7 @@ def create_runs_router() -> APIRouter:
         "/runs/{run_id}/approvals/{approval_id}",
         summary="Decide an approval",
         description="Approve or deny an approval a paused run is waiting for.",
-        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
     )
     async def decide_approval(
         request: Request, run_id: str, approval_id: str, body: ApprovalDecisionRequest
@@ -253,6 +271,16 @@ def create_runs_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(exc)) from None
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
+        except RunStateConflict:
+            # The paused run's own writes kept changing its record while the
+            # decision was saved, and ``decide`` ran out of re-reads: nothing
+            # was saved, so the same decision can be sent again. It was a 500
+            # (found after the support desk soak, 2026-10-08).
+            raise HTTPException(
+                status_code=503,
+                detail="The run was changing while the decision was saved; nothing was saved. Send the same decision again.",
+                headers={"Retry-After": "1"},
+            ) from None
         return _public_view(agent, approval)
 
     @router.get(
@@ -375,7 +403,8 @@ def create_runs_router() -> APIRouter:
         response_model=RunResponse,
         summary="Resume a paused run",
         description="Continue a run once every approval it asked for is decided.",
-        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+        responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+        dependencies=[Depends(run_slot)],
     )
     async def resume_run(request: Request, run_id: str) -> RunResponse:
         agent = get_agent(request)
@@ -436,6 +465,8 @@ def _public_run(agent, record: dict) -> dict:
             # Whether a `running` run is alive, and which try this is: what
             # Durable runs reads from get_run, over HTTP too (the 0.5.0rc2 gate).
             "heartbeat_at", "lease_seconds", "attempt", "previous_attempts",
+            # What a run that timed out or failed already did.
+            "side_effects",
         )
     }
     view["approvals"] = [_public_view(agent, a, record) for a in record.get("approvals") or []]
